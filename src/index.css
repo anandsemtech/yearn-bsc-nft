@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+.glass {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+  backdrop-filter: blur(10px);
+}
+
+.input { @apply w-full px-3 py-2 rounded-xl bg-black/30 border border-white/10 outline-none focus:ring-2 focus:ring-indigo-400; }
+.btn { @apply inline-flex items-center justify-center rounded-xl px-4 py-2 font-medium transition active:scale-[0.99]; }
+.btn-primary { @apply btn bg-indigo-500 hover:bg-indigo-400 text-white; }
+.btn-secondary { @apply btn bg-white/10 hover:bg-white/20 text-white; }
+.badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-white/10; }
+.card { @apply glass rounded-2xl p-5; }
+
+/* --- Metaverse placeholder helpers (pure CSS, no images) --- */
+.mv-starfield {
+  background:
+    radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 40% 60%, rgba(255,255,255,.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 70% 30%, rgba(255,255,255,.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,.4) 50%, transparent 51%);
+  background-repeat: repeat;
+  background-size: 200px 200px;
+  opacity: .5;
+}
+
+.mv-floor {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to right, rgba(255,255,255,.06) 1px, transparent 1px),
+    linear-gradient(to top, rgba(255,255,255,.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  transform-origin: center bottom;
+  transform: perspective(800px) rotateX(60deg) translateY(35%);
+  mask-image: linear-gradient(to top, black, transparent);
+  -webkit-mask-image: linear-gradient(to top, black, transparent);
+  opacity: .6;
+}
+
+.mv-sun {
+  position: absolute; inset: 0;
+  background: radial-gradient(240px 240px at 50% 20%, rgba(129,140,248,.45), transparent 60%);
+  filter: blur(8px);
+}
+
+.mv-ring {
+  border: 1px solid rgba(255,255,255,.2);
+  box-shadow: 0 0 80px rgba(129,140,248,.25) inset;
+}
+
+.mv-orb {
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.9), rgba(129,140,248,.6));
+  filter: saturate(1.1);
+}
