@@ -1,8 +1,14 @@
+// src/components/Header.tsx
 import React, { useEffect } from "react";
 import { useAccount, useChainId, useWalletClient, useDisconnect } from "wagmi";
 import { bsc } from "@reown/appkit/networks";
 import { appKit } from "../lib/appkit";
-import { motion, useMotionTemplate, useMotionValue } from "framer-motion";
+import {
+  motion,
+  useMotionTemplate,
+  useMotionValue,
+  useTransform,
+} from "framer-motion";
 import { Wallet2, ShieldAlert, CheckCircle2, LogOut } from "lucide-react";
 import YearnTogetherMark from "./YearnTogetherMark";
 
@@ -12,11 +18,23 @@ const Header: React.FC = () => {
   const { data: walletClient } = useWalletClient();
   const { disconnect } = useDisconnect();
 
-  const wrongChain = isConnected && chainId !== bsc.id;
-
-  const x = useMotionValue(0.5);
+  // ---- Glow / tilt cursor state (replace useTilt3D with local MotionValues) ----
+  const x = useMotionValue(0.5); // normalized 0..1 across header
   const y = useMotionValue(0.5);
-  const glow = useMotionTemplate`radial-gradient(700px 450px at ${x * 100}% ${y * 100}%, rgba(244,114,182,.28), rgba(56,189,248,.22) 35%, rgba(99,102,241,.18) 60%, transparent 70%)`;
+  const xPct = useTransform(x, (v: number) => v * 100);
+  const yPct = useTransform(y, (v: number) => v * 100);
+
+  const glow = useMotionTemplate`
+    radial-gradient(
+      700px 450px at ${xPct}% ${yPct}%,
+      rgba(244,114,182,.28),
+      rgba(56,189,248,.22) 35%,
+      rgba(99,102,241,.18) 60%,
+      transparent 70%
+    )
+  `;
+
+  const wrongChain = isConnected && chainId !== bsc.id;
 
   function onMouseMove(e: React.MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -56,16 +74,17 @@ const Header: React.FC = () => {
     }
   }
 
-  // NEW: clean wagmi/app state on disconnect
+  // Clean wagmi + kit state on disconnect
   const handleDisconnect = async () => {
     try {
-      // If your modal kit exposes a disconnect, call it first (no-op if absent)
-      // @ts-ignore - optional method
+      // Optional: some kits expose a disconnect method
+      // @ts-ignore
       if (typeof appKit?.disconnect === "function") {
         await appKit.disconnect();
       }
-    } catch { /* ignore */ }
-    // Always call wagmi disconnect to clear connector/session in app state
+    } catch {
+      /* ignore */
+    }
     disconnect();
   };
 
@@ -73,7 +92,7 @@ const Header: React.FC = () => {
     if (isConnected && chainId && chainId !== bsc.id) {
       ensureBsc().catch(() => {});
     }
-  }, [isConnected, chainId]); // eslint-disable-line
+  }, [isConnected, chainId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shortAddr = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "";
 
@@ -158,7 +177,7 @@ const Header: React.FC = () => {
                 </span>
               </motion.button>
 
-              {/* NEW: Disconnect */}
+              {/* Disconnect */}
               <motion.button
                 onClick={handleDisconnect}
                 whileTap={{ scale: 0.98 }}
