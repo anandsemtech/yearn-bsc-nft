@@ -38,6 +38,7 @@ import {
 import MetaverseScene from "./fx/MetaverseScene";
 import { FILTER_EVENT, NftFilter } from "./FooterBar";
 import YearnChamp from "../assets/YearnChamp.gif";
+import { appKit } from "../lib/appkit";
 
 // Payment token constants
 import {
@@ -46,17 +47,14 @@ import {
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
-
-
 type Props = {
   passAddress: Address;
   marketAddress: Address;
   tier: { id: number; uri: string };
-  tokenAddress?: Address;   
+  tokenAddress?: Address;
   tokenDecimals?: number;
   tokenSymbol?: string;
 };
-
 
 const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 
@@ -271,7 +269,7 @@ export default function TierCard({
   tokenDecimals,
   tokenSymbol,
 }: Props) {
-  const { isConnected, address, chain } = useAccount();
+  const { isConnected, address, chain, status } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
@@ -291,12 +289,13 @@ export default function TierCard({
 
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
 
+  const connected = isConnected && !!address;
 
   const [name] = React.useState(`Pass #${tier.id}`);
   const [owned, setOwned] = React.useState(false);
 
   // Your price (per-user), plus full tier prices for display
-  const [price, setPrice] = React.useState<bigint>(0n); // priceOf(id, address)
+  const [price, setPrice] = React.useState<bigint>(0n); // priceOf(id, address) or pricePublic
   const [pubPrice, setPubPrice] = React.useState<bigint>(0n);
   const [wlPrice, setWlPrice] = React.useState<bigint>(0n);
   const [isWl, setIsWl] = React.useState(false);
@@ -319,8 +318,29 @@ export default function TierCard({
   React.useEffect(() => {
     let stop = false;
     (async () => {
-      if (!address || !publicClient) return;
+      if (!publicClient) return;
+
       try {
+        if (!address) {
+          // Not connected → display public price
+          const pPub = (await publicClient.readContract({
+            address: marketAddress,
+            abi: MARKET_ABI,
+            functionName: "pricePublic",
+            args: [BigInt(tier.id)],
+          })) as bigint;
+
+          if (!stop) {
+            setOwned(false);
+            setIsWl(false);
+            setWlPrice(0n);
+            setPubPrice(pPub);
+            setPrice(pPub); // effective price while disconnected
+          }
+          return;
+        }
+
+        // Connected → full state
         const [bal, pYour, wl, pPub, pWl] = await Promise.all([
           publicClient.readContract({
             address: passAddress,
@@ -356,7 +376,7 @@ export default function TierCard({
 
         if (!stop) {
           setOwned(bal > 0n);
-          setPrice(pYour); // Your effective price from contract
+          setPrice(pYour);
           setIsWl(wl);
           setPubPrice(pPub);
           setWlPrice(pWl);
@@ -370,12 +390,31 @@ export default function TierCard({
     };
   }, [address, publicClient, tier.id, passAddress, marketAddress]);
 
+  // Reset derived state immediately on disconnect
+  React.useEffect(() => {
+    if (status === "disconnected") {
+      setOwned(false);
+      setIsWl(false);
+      setTokenBal(0n);
+      setCelebrate(false);
+      setTxStage("hidden");
+      setErr(null);
+      // price effect above will repopulate price with public price
+    }
+  }, [status]);
+
   // Load token balance
   React.useEffect(() => {
     let stop = false;
     (async () => {
       try {
-        if (!address || !publicClient || !needsToken || isZeroAddress(payTokenAddress)) {
+        if (
+          !connected ||
+          !address ||
+          !publicClient ||
+          !needsToken ||
+          isZeroAddress(payTokenAddress)
+        ) {
           if (!stop) setTokenBal(0n);
           return;
         }
@@ -393,7 +432,14 @@ export default function TierCard({
     return () => {
       stop = true;
     };
-  }, [address, publicClient, payTokenAddress, needsToken, price]);
+  }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
+
+  // Optional: respond to external provider change shim (if used in App root)
+  React.useEffect(() => {
+    const rerun = () => setErr((e) => e);
+    window.addEventListener("wallet:changed", rerun);
+    return () => window.removeEventListener("wallet:changed", rerun);
+  }, []);
 
   // Global filter -> visibility
   React.useEffect(() => {
@@ -412,21 +458,19 @@ export default function TierCard({
   const buy = async () => {
     setErr(null);
 
-    if (!isConnected) {
-      setErr("Connect your wallet first.");
-      return;
-    }
-    if (!address) {
-      setErr("No account found in wallet.");
+    if (!connected || !address) {
+      try {
+        appKit?.open?.();
+      } catch {
+        setErr("Connect your wallet first.");
+      }
       return;
     }
     if (!walletClient || !publicClient) {
       setErr("Wallet or RPC is not ready.");
       return;
     }
-    if (owned) {
-      return;
-    }
+    if (owned) return;
     if (isZeroAddress(marketAddress)) {
       setErr("Market address is not set.");
       return;
@@ -548,9 +592,8 @@ export default function TierCard({
   };
 
   // Labels
-  const yourPriceLabel = priceIsFree
-    ? "Free"
-    : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
+  const yourPriceLabel =
+    priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
   const pubPriceLabel = `${formatUnits(pubPrice, payTokenDecimals)} ${payTokenSymbol}`;
   const wlPriceLabel = `${formatUnits(wlPrice, payTokenDecimals)} ${payTokenSymbol}`;
   const youSave =
@@ -594,9 +637,9 @@ export default function TierCard({
                 <div className="absolute top-3 right-3 z-30">
                   <div className="relative">
                     <div className="absolute -inset-2 blur-md bg-gradient-to-r from-indigo-400/25 to-cyan-300/20 rounded-full" />
-                    
                   </div>
-                  {!owned && !hasFunds && (
+                  {/* Only show when CONNECTED, not owned, and short on funds */}
+                  {connected && !owned && !hasFunds && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/15 text-red-100 ring-1 ring-red-400/30 text-[11px]">
                       <AlertCircle className="w-3 h-3" />
                       Insufficient {payTokenSymbol}
@@ -643,8 +686,7 @@ export default function TierCard({
                 </h3>
 
                 <div className="flex items-center gap-2">
-                  {/* If you want the inline pill too, keep this; else remove */}
-                  {isWl && !owned && (
+                  {connected && isWl && !owned && (
                     <motion.span
                       initial={{ y: -6, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
@@ -666,20 +708,20 @@ export default function TierCard({
                 </div>
               </div>
 
-              {/* Price area: show YOUR price + PUBLIC price always when whitelisted */}
+              {/* Price area */}
               <div className="mt-2 flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <div className="absolute inset-0 blur-md bg-gradient-to-r from-indigo-400/20 to-cyan-300/20 rounded-full" />
                   <div className="relative rounded-full px-3 py-1 text-xs md:text-sm text-white/85 bg-black/40 ring-1 ring-white/10">
                     <span className="mr-1 opacity-80">
-                      {isWl ? "Your price" : "Price"}
+                      {connected && isWl ? "Your price" : connected ? "Price" : "Public price"}
                     </span>
                     <strong className="font-semibold">{yourPriceLabel}</strong>
                   </div>
                 </div>
 
-                {/* Show public reference when WL (even if equal) */}
-                {isWl && (
+                {/* Show public / WL references only when connected */}
+                {connected && isWl && (
                   <span
                     className={`text-[11px] md:text-xs ${
                       pubPrice > price
@@ -692,8 +734,7 @@ export default function TierCard({
                   </span>
                 )}
 
-                {/* Also show explicit WL price reference */}
-                {isWl && (
+                {connected && isWl && (
                   <span
                     className="text-[11px] md:text-xs text-indigo-200/90"
                     title={`Whitelist price: ${wlPriceLabel}`}
@@ -702,24 +743,23 @@ export default function TierCard({
                   </span>
                 )}
 
-                {/* Savings / free indicators */}
-                {isWl && youSave && pubPrice > price && (
+                {connected && isWl && youSave && pubPrice > price && (
                   <span className="text-[11px] md:text-xs inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20">
                     You save {youSave}
                   </span>
                 )}
-                {isWl && priceIsFree && (
+                {connected && isWl && priceIsFree && (
                   <span className="text-[11px] md:text-xs inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-violet-400/10 text-violet-200 ring-1 ring-violet-300/20">
                     Whitelist free mint 🎉
                   </span>
                 )}
               </div>
 
-              {/* Subtle balance line */}
-              {needsToken && (
+              {/* Subtle balance line (hidden until connected) */}
+              {connected && needsToken && (
                 <div className="mt-1 text-[11px] md:text-xs text-white/60">
                   Balance: {format3(tokenBal, payTokenDecimals)} {payTokenSymbol}
-                  {!owned && !hasFunds && (
+                  {connected && !owned && !hasFunds && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/10 text-red-200 ring-1 ring-red-400/20">
                       <AlertCircle className="w-3 h-3" />
                       Insufficient {payTokenSymbol}
@@ -731,7 +771,7 @@ export default function TierCard({
               {/* CTA */}
               <motion.button
                 onClick={buy}
-                disabled={!isConnected || owned || busy || !hasFunds}
+                disabled={owned || busy || (!hasFunds && needsToken)}
                 whileTap={{ scale: 0.985 }}
                 className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3
                   text-sm font-semibold tracking-wide focus:outline-none
@@ -752,12 +792,19 @@ export default function TierCard({
                 <span className="relative flex items-center gap-2">
                   {busy ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white/80" />{" "}
-                      Processing…
+                      <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
                     </>
                   ) : owned ? (
                     <>
                       <Check className="w-4 h-4 text-emerald-300/90" /> Claimed
+                    </>
+                  ) : !connected ? (
+                    <>
+                      <Wallet2 className="w-4 h-4" /> Connect to Buy
+                    </>
+                  ) : priceIsFree ? (
+                    <>
+                      <SparkIcon className="w-4 h-4" /> Claim Free Mint
                     </>
                   ) : !hasFunds && needsToken ? (
                     <>
@@ -765,8 +812,7 @@ export default function TierCard({
                     </>
                   ) : (
                     <>
-                      <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
-                      Now
+                      <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy Now
                     </>
                   )}
                 </span>

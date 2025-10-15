@@ -3,6 +3,7 @@ import Header from "./components/Header";
 import TierCard from "./components/TierCard";
 import AdminPanel from "./components/AdminPanel";
 import FooterBar from "./components/FooterBar";
+import EmptyVault from "./components/EmptyVault";
 import { useReadContract } from "wagmi";
 import { YEARNPASS1155_ABI, ERC20_ABI } from "./lib/abi";
 import {
@@ -72,12 +73,18 @@ export default function App() {
           ))}
         </section>
 
+        {/* Animated empty state: shows only on “My NFT” when the wallet owns none */}
+        <EmptyVault
+          passAddress={PASS_ADDRESS}
+          tiers={tiers.map(({ id }) => ({ id }))}
+        />
+
         {isAdmin && (
           <section>
             <AdminPanel
               passAddress={PASS_ADDRESS}
               marketAddress={MARKET_ADDRESS}
-              tokenAddress={YEARN_TOKEN}  
+              tokenAddress={YEARN_TOKEN}
               tierIds={[...TIER_IDS]}
             />
           </section>
