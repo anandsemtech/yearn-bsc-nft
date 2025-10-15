@@ -18,8 +18,8 @@ const Header: React.FC = () => {
   const { data: walletClient } = useWalletClient();
   const { disconnect } = useDisconnect();
 
-  // ---- Glow / tilt cursor state (replace useTilt3D with local MotionValues) ----
-  const x = useMotionValue(0.5); // normalized 0..1 across header
+  // ---- Glow / tilt cursor state ----
+  const x = useMotionValue(0.5);
   const y = useMotionValue(0.5);
   const xPct = useTransform(x, (v: number) => v * 100);
   const yPct = useTransform(y, (v: number) => v * 100);
@@ -74,7 +74,6 @@ const Header: React.FC = () => {
     }
   }
 
-  // Clean wagmi + kit state on disconnect
   const handleDisconnect = async () => {
     try {
       // Optional: some kits expose a disconnect method
@@ -129,22 +128,22 @@ const Header: React.FC = () => {
         <div className="relative flex items-center gap-3">
           <YearnTogetherMark imgClassName="h-7 sm:h-8" />
           {isConnected && (
-            <span className="hidden sm:inline-block px-2 py-1 rounded-lg bg-white/5 ring-1 ring-white/10 text-[11px] text-white/70">
+            <span className="hidden sm:inline-block px-2 py-1 rounded-lg bg-white/5 ring-1 ring-white/10 text-[11px] text-white/70 whitespace-nowrap">
               chain: {chainId ?? "—"}
             </span>
           )}
         </div>
 
         {/* Right: Wallet / Address / Disconnect */}
-        <div className="relative flex items-center gap-2 sm:gap-3">
+        <div className="relative flex items-center gap-2 sm:gap-3 min-w-0">
           {isConnected && (
-            <div className="relative hidden md:flex items-center gap-2 rounded-xl px-3 py-2 bg-white/5 ring-1 ring-white/10 text-white/80">
+            <div className="relative hidden md:flex items-center gap-2 rounded-xl px-3 py-2 bg-white/5 ring-1 ring-white/10 text-white/80 whitespace-nowrap">
               <div
                 className={`h-2 w-2 rounded-full ${
                   wrongChain ? "bg-rose-400" : "bg-emerald-400"
                 } shadow-[0_0_10px]`}
               />
-              <span className="text-xs">{shortAddr}</span>
+              <span className="text-xs font-mono">{shortAddr}</span>
               {!wrongChain && (
                 <CheckCircle2 className="w-4 h-4 text-emerald-300/90" />
               )}
@@ -159,7 +158,7 @@ const Header: React.FC = () => {
                 whileTap={{ scale: 0.98 }}
                 className={`relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold tracking-wide focus:outline-none ring-1 ring-white/10 ${
                   wrongChain ? "text-white" : "text-black"
-                }`}
+                } whitespace-nowrap min-w-0`}
               >
                 <span
                   aria-hidden
@@ -170,10 +169,12 @@ const Header: React.FC = () => {
                     wrongChain
                       ? "bg-gradient-to-r from-rose-500 to-orange-400"
                       : "bg-gradient-to-r from-fuchsia-500 via-cyan-400 to-indigo-500"
-                  }`}
+                  } whitespace-nowrap min-w-0`}
                 >
-                  <Wallet2 className="w-4 h-4" />
-                  {wrongChain ? "Switch to BSC" : shortAddr}
+                  <Wallet2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate max-w-[48vw] sm:max-w-none leading-none font-mono">
+                    {wrongChain ? "Switch to BSC" : shortAddr}
+                  </span>
                 </span>
               </motion.button>
 
@@ -181,7 +182,7 @@ const Header: React.FC = () => {
               <motion.button
                 onClick={handleDisconnect}
                 whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold tracking-wide text-white/90 hover:text-white bg-white/5 hover:bg-white/10 ring-1 ring-white/10"
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold tracking-wide text-white/90 hover:text-white bg-white/5 hover:bg-white/10 ring-1 ring-white/10 whitespace-nowrap"
                 title="Disconnect wallet"
               >
                 <LogOut className="w-4 h-4" />
@@ -192,13 +193,13 @@ const Header: React.FC = () => {
             <motion.button
               onClick={() => appKit.open()}
               whileTap={{ scale: 0.98 }}
-              className="relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold tracking-wide text-black focus:outline-none ring-1 ring-white/10"
+              className="relative inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold tracking-wide text-black focus:outline-none ring-1 ring-white/10 whitespace-nowrap"
             >
               <span
                 aria-hidden
                 className="absolute -inset-[1px] rounded-xl bg-gradient-to-r from-fuchsia-500 via-cyan-400 to-indigo-500 opacity-70 blur-md"
               />
-              <span className="relative inline-flex items-center gap-2 rounded-xl px-4 py-2 bg-gradient-to-r from-fuchsia-500 via-cyan-400 to-indigo-500">
+              <span className="relative inline-flex items-center gap-2 rounded-xl px-4 py-2 bg-gradient-to-r from-fuchsia-500 via-cyan-400 to-indigo-500 whitespace-nowrap">
                 <Wallet2 className="w-4 h-4" />
                 Connect Wallet
               </span>
