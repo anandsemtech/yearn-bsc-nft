@@ -17,7 +17,7 @@ import {
   Wallet2,
 } from "lucide-react";
 import type { Address } from "viem";
-import { formatUnits, maxUint256 } from "viem";
+import { formatUnits, maxUint256, toHex } from "viem";
 import {
   useAccount,
   usePublicClient,
@@ -37,20 +37,28 @@ import {
 } from "./fx/HoloPrimitives";
 import MetaverseScene from "./fx/MetaverseScene";
 import { FILTER_EVENT, NftFilter } from "./FooterBar";
-import YearnChamp from "../assets/YearnChamp.gif";
 import { appKit } from "../lib/appkit";
-
-// Payment token constants
 import {
   YEARN_TOKEN,
   YEARN_TOKEN_DECIMALS,
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
+/** Env overrides */
+const ENV_COLLECTION_URI =
+  (import.meta as any)?.env?.VITE_COLLECTION_URI ||
+  (import.meta as any)?.env?.COLLECTION_URI ||
+  "";
+const DEFAULT_IPFS_GATEWAY =
+  (import.meta as any)?.env?.VITE_IPFS_GATEWAY || "https://ipfs.io/ipfs/";
+const ID_FORMAT = (
+  (import.meta as any)?.env?.VITE_ERC1155_ID_FORMAT || "hex"
+).toLowerCase() as "hex" | "dec";
+
 type Props = {
   passAddress: Address;
   marketAddress: Address;
-  tier: { id: number; uri: string };
+  tier: { id: number; uri: string }; // uri may be empty; we’ll read on-chain
   tokenAddress?: Address;
   tokenDecimals?: number;
   tokenSymbol?: string;
@@ -58,7 +66,7 @@ type Props = {
 
 const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 
-// format bigint token to exactly 3 decimals (string-safe)
+/** Format bigint token to exactly 3 decimals */
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
   const [i, d = ""] = str.split(".");
@@ -66,17 +74,48 @@ const format3 = (value: bigint, decimals: number) => {
   return `${i}.${dec}`;
 };
 
+/** IPFS helper */
+const ipfsToHttp = (uri?: string, gateway = DEFAULT_IPFS_GATEWAY): string | undefined => {
+  if (!uri) return undefined;
+  if (uri.startsWith("ipfs://")) return gateway + uri.slice("ipfs://".length);
+  return uri;
+};
+
+/** ERC-1155 placeholder resolver */
+const idHex64 = (n: number) => toHex(BigInt(n)).slice(2).toLowerCase().padStart(64, "0");
+const resolveTokenJsonUrl = (template: string, id: number): string => {
+  if (!template) return "";
+  let out = template;
+
+  // Strict placeholder
+  if (/\{idhex\}/i.test(out)) out = out.replace(/\{idhex\}/gi, idHex64(id));
+
+  // Common placeholder
+  if (out.includes("{id}")) {
+    const rep = ID_FORMAT === "dec" ? String(id) : idHex64(id);
+    out = out.replace("{id}", rep);
+  }
+
+  return out;
+};
+
+type NftMeta = {
+  name?: string;
+  description?: string;
+  image?: string;
+  animation_url?: string;
+  external_url?: string;
+  attributes?: Array<{ trait_type?: string; value?: string }>;
+};
+
 /* ──────────────────────────────────────────────────────────────
-   Tx Dialog (modal with stages)
+   Tx Dialog
    ────────────────────────────────────────────────────────────── */
 type TxStage = "hidden" | "waiting" | "confirming" | "success";
 const stageCopy: Record<TxStage, { title: string; subtitle: string }> = {
   hidden: { title: "", subtitle: "" },
   waiting: { title: "Waiting…", subtitle: "Approve payment token if prompted" },
-  confirming: {
-    title: "Confirming…",
-    subtitle: "Your transaction is being confirmed on-chain",
-  },
+  confirming: { title: "Confirming…", subtitle: "Your transaction is being confirmed on-chain" },
   success: { title: "Success!", subtitle: "NFT is added to your wallet" },
 };
 
@@ -89,41 +128,21 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
       <motion.div
         key="tx-dialog"
         className="absolute inset-0 grid place-items-center z-[60] pointer-events-none"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       >
         <motion.div
           className={`pointer-events-auto relative mx-4 w-full max-w-sm rounded-2xl ${
-            isSuccess
-              ? "bg-black/40 ring-1 ring-emerald-300/20"
-              : "bg-[#0b0f17]/85 ring-1 ring-white/10"
+            isSuccess ? "bg-black/40 ring-1 ring-emerald-300/20" : "bg-[#0b0f17]/85 ring-1 ring-white/10"
           } p-5 text-center`}
-          initial={{ scale: 0.96, y: 8 }}
-          animate={{ scale: 1, y: 0 }}
-          exit={{ scale: 0.98, y: 4 }}
+          initial={{ scale: 0.96, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 4 }}
           transition={{ type: "spring", stiffness: 200, damping: 20 }}
         >
           <div className="flex items-center justify-center mb-3">
-            {isSuccess ? (
-              <Check className="w-6 h-6 text-emerald-300" />
-            ) : (
-              <Loader2 className="w-6 h-6 text-white/85 animate-spin" />
-            )}
+            {isSuccess ? <Check className="w-6 h-6 text-emerald-300" /> : <Loader2 className="w-6 h-6 text-white/85 animate-spin" />}
           </div>
-          <h4
-            className={`font-semibold ${
-              isSuccess ? "text-emerald-200" : "text-white/90"
-            }`}
-          >
-            {title}
-          </h4>
+          <h4 className={`font-semibold ${isSuccess ? "text-emerald-200" : "text-white/90"}`}>{title}</h4>
           <p className="mt-1 text-sm text-white/70">{subtitle}</p>
-          {isSuccess && (
-            <p className="mt-2 text-xs text-emerald-200/85">
-              You can see your NFT in your wallet.
-            </p>
-          )}
+          {isSuccess && <p className="mt-2 text-xs text-emerald-200/85">You can see your NFT in your wallet.</p>}
         </motion.div>
       </motion.div>
     </AnimatePresence>
@@ -131,19 +150,9 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────
-   Confetti
+   Confetti + Overlay
    ────────────────────────────────────────────────────────────── */
-type ConfettiPiece = {
-  id: number;
-  x: number;
-  y: number;
-  r: number;
-  vx: number;
-  vy: number;
-  s: number;
-  d: number;
-  delay: number;
-};
+type ConfettiPiece = { id: number; x: number; y: number; r: number; vx: number; vy: number; s: number; d: number; delay: number; };
 const makeConfetti = (count = 110): ConfettiPiece[] =>
   Array.from({ length: count }).map((_, i) => {
     const angle = Math.random() * Math.PI - Math.PI / 2;
@@ -163,40 +172,17 @@ const makeConfetti = (count = 110): ConfettiPiece[] =>
 
 const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   const [pieces, setPieces] = React.useState<ConfettiPiece[]>([]);
-  React.useEffect(() => {
-    if (show) setPieces(makeConfetti());
-  }, [show]);
+  React.useEffect(() => { if (show) setPieces(makeConfetti()); }, [show]);
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
-          className="absolute inset-0 overflow-hidden z-[50] pointer-events-none"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
+        <motion.div className="absolute inset-0 overflow-hidden z-[50] pointer-events-none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           {pieces.map((p) => (
             <motion.span
-              key={p.id}
-              className="absolute block"
-              style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                width: 8,
-                height: 10,
-                transformOrigin: "center",
-                background: "white",
-                borderRadius: 2,
-                boxShadow: "0 0 8px rgba(255,255,255,.15)",
-              }}
+              key={p.id} className="absolute block"
+              style={{ left: `${p.x}%`, top: `${p.y}%`, width: 8, height: 10, transformOrigin: "center", background: "white", borderRadius: 2, boxShadow: "0 0 8px rgba(255,255,255,.15)" }}
               initial={{ opacity: 0, scale: 0.4, rotate: p.r }}
-              animate={{
-                opacity: [0, 1, 1, 0],
-                x: [0, p.vx * 0.35, p.vx * 0.7],
-                y: [0, p.vy * 0.5, p.vy],
-                rotate: [p.r, p.r + 360],
-                scale: [p.s, p.s * 0.9, p.s * 0.8],
-              }}
+              animate={{ opacity: [0, 1, 1, 0], x: [0, p.vx * 0.35, p.vx * 0.7], y: [0, p.vy * 0.5, p.vy], rotate: [p.r, p.r + 360], scale: [p.s, p.s * 0.9, p.s * 0.8] }}
               transition={{ delay: p.delay, duration: p.d, ease: "easeOut" }}
             />
           ))}
@@ -206,57 +192,12 @@ const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   );
 };
 
-/* ──────────────────────────────────────────────────────────────
-   Overlay: BLUR → CONFETTI → DIALOG
-   ────────────────────────────────────────────────────────────── */
-const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({
-  blur,
-  children,
-}) => {
-  return (
-    <div className="absolute inset-0 isolate z-40">
-      <div
-        className={`absolute inset-0 rounded-xl transition ${
-          blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"
-        }`}
-      />
-      {children}
-    </div>
-  );
-};
-
-/* ──────────────────────────────────────────────────────────────
-   Corner ribbon (contained; no overflow clipping)
-   ────────────────────────────────────────────────────────────── */
-const CornerRibbon: React.FC<{ show: boolean }> = ({ show }) => {
-  if (!show) return null;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 180, damping: 18 }}
-      className="absolute top-2 left-2 z-30"
-    >
-      <div
-        className="
-          px-3 py-1
-          text-[10px] md:text-[11px] font-semibold uppercase tracking-wider
-          text-white
-          bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-400
-          ring-1 ring-white/10 shadow
-          rounded-sm
-        "
-        style={{
-          clipPath:
-            "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0% 100%)",
-        }}
-        title="You're whitelisted for this tier"
-      >
-        Whitelisted
-      </div>
-    </motion.div>
-  );
-};
+const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({ blur, children }) => (
+  <div className="absolute inset-0 isolate z-40">
+    <div className={`absolute inset-0 rounded-xl transition ${blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"}`} />
+    {children}
+  </div>
+);
 
 /* ──────────────────────────────────────────────────────────────
    Main
@@ -275,38 +216,34 @@ export default function TierCard({
   const { switchChainAsync } = useSwitchChain();
   const currentChainId = useChainId();
 
-  // Prefer props when provided; otherwise fall back to constants
+  // Preferred payment token setup
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
-
-  // YEARN_TOKEN_DECIMALS might be an env string -> convert safely
   const envDecimals = Number(YEARN_TOKEN_DECIMALS);
-  const payTokenDecimals =
-    typeof tokenDecimals === "number"
-      ? tokenDecimals
-      : Number.isFinite(envDecimals)
-      ? envDecimals
-      : 18;
-
+  const payTokenDecimals = typeof tokenDecimals === "number" ? tokenDecimals : Number.isFinite(envDecimals) ? envDecimals : 18;
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
-
   const connected = isConnected && !!address;
 
-  const [name] = React.useState(`Pass #${tier.id}`);
+  // Metadata state
+  const [meta, setMeta] = React.useState<NftMeta | null>(null);
+  const [mediaUrl, setMediaUrl] = React.useState<string | undefined>(undefined);
+  const [isVideo, setIsVideo] = React.useState(false);
+  const [name, setName] = React.useState(`Pass #${tier.id}`);
   const [owned, setOwned] = React.useState(false);
 
-  // Your price (per-user), plus full tier prices for display
-  const [price, setPrice] = React.useState<bigint>(0n); // priceOf(id, address) or pricePublic
+  // Pricing / WL
+  const [price, setPrice] = React.useState<bigint>(0n);
   const [pubPrice, setPubPrice] = React.useState<bigint>(0n);
   const [wlPrice, setWlPrice] = React.useState<bigint>(0n);
   const [isWl, setIsWl] = React.useState(false);
 
+  // Wallet token balance
   const [tokenBal, setTokenBal] = React.useState<bigint>(0n);
 
+  // UI states
   const [busy, setBusy] = React.useState(false);
   const [celebrate, setCelebrate] = React.useState(false);
   const [visible, setVisible] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-
   const [txStage, setTxStage] = React.useState<TxStage>("hidden");
 
   // Flags
@@ -314,15 +251,75 @@ export default function TierCard({
   const needsToken = !priceIsFree;
   const hasFunds = priceIsFree || tokenBal >= price;
 
-  // Load ownership + prices + whitelist status
+  /** Load metadata (reads on-chain base uri if per-tier uri is empty) */
+  React.useEffect(() => {
+    let aborted = false;
+    const ctrl = new AbortController();
+
+    const pickGateway = (u?: string) => (u ? ipfsToHttp(u) || u : undefined);
+
+    (async () => {
+      try {
+        // 1) On-chain via uri(id) if local tier.uri is empty
+        let base = tier.uri?.trim() || "";
+        if (!base && publicClient) {
+          try {
+            base = (await publicClient.readContract({
+              address: passAddress,
+              abi: YEARNPASS1155_ABI,
+              functionName: "uri",
+              args: [BigInt(tier.id)],
+            })) as string;
+          } catch {
+            /* ignore */
+          }
+        }
+
+        // 2) Fallback to env override
+        const chosenBase = (base && base.length > 0 ? base : ENV_COLLECTION_URI) || "";
+
+        const tokenJsonUri = resolveTokenJsonUrl(chosenBase, tier.id);
+        if (!tokenJsonUri) return;
+
+        const jsonUrl = pickGateway(tokenJsonUri);
+        if (!jsonUrl) return;
+
+        const res = await fetch(jsonUrl, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as NftMeta;
+        if (aborted) return;
+
+        setMeta(data);
+        setName(data?.name || `Pass #${tier.id}`);
+
+        const media = data?.animation_url || data?.image;
+        const mediaHttp = pickGateway(media);
+        setMediaUrl(mediaHttp);
+
+        const isVid =
+          !!mediaHttp &&
+          (/\.(mp4|webm|mov|ogv)$/i.test(mediaHttp) ||
+            (!!data?.animation_url && !/\.(png|jpe?g|gif|webp|svg)$/i.test(mediaHttp)));
+        setIsVideo(isVid);
+      } catch {
+        /* keep placeholder */
+      }
+    })();
+
+    return () => {
+      aborted = true;
+      ctrl.abort();
+    };
+  }, [tier.id, tier.uri, passAddress, publicClient]);
+
+  /** Ownership + prices + WL */
   React.useEffect(() => {
     let stop = false;
     (async () => {
       if (!publicClient) return;
-
       try {
         if (!address) {
-          // Not connected → display public price
           const pPub = (await publicClient.readContract({
             address: marketAddress,
             abi: MARKET_ABI,
@@ -335,12 +332,11 @@ export default function TierCard({
             setIsWl(false);
             setWlPrice(0n);
             setPubPrice(pPub);
-            setPrice(pPub); // effective price while disconnected
+            setPrice(pPub);
           }
           return;
         }
 
-        // Connected → full state
         const [bal, pYour, wl, pPub, pWl] = await Promise.all([
           publicClient.readContract({
             address: passAddress,
@@ -385,12 +381,10 @@ export default function TierCard({
         if (!stop) setErr("Unable to fetch price/whitelist right now.");
       }
     })();
-    return () => {
-      stop = true;
-    };
+    return () => { stop = true; };
   }, [address, publicClient, tier.id, passAddress, marketAddress]);
 
-  // Reset derived state immediately on disconnect
+  /** Reset on disconnect */
   React.useEffect(() => {
     if (status === "disconnected") {
       setOwned(false);
@@ -399,22 +393,15 @@ export default function TierCard({
       setCelebrate(false);
       setTxStage("hidden");
       setErr(null);
-      // price effect above will repopulate price with public price
     }
   }, [status]);
 
-  // Load token balance
+  /** Load payment token balance */
   React.useEffect(() => {
     let stop = false;
     (async () => {
       try {
-        if (
-          !connected ||
-          !address ||
-          !publicClient ||
-          !needsToken ||
-          isZeroAddress(payTokenAddress)
-        ) {
+        if (!connected || !address || !publicClient || !needsToken || isZeroAddress(payTokenAddress)) {
           if (!stop) setTokenBal(0n);
           return;
         }
@@ -429,19 +416,10 @@ export default function TierCard({
         if (!stop) setTokenBal(0n);
       }
     })();
-    return () => {
-      stop = true;
-    };
+    return () => { stop = true; };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
 
-  // Optional: respond to external provider change shim (if used in App root)
-  React.useEffect(() => {
-    const rerun = () => setErr((e) => e);
-    window.addEventListener("wallet:changed", rerun);
-    return () => window.removeEventListener("wallet:changed", rerun);
-  }, []);
-
-  // Global filter -> visibility
+  /** Filter visibility */
   React.useEffect(() => {
     const apply = (mode: NftFilter) => setVisible(mode === "all" ? true : owned);
     const initial = (localStorage.getItem("nft.filter") as NftFilter) || "all";
@@ -454,63 +432,31 @@ export default function TierCard({
     return () => window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
   }, [owned]);
 
-  // Buy flow
+  /** Buy flow */
   const buy = async () => {
     setErr(null);
 
     if (!connected || !address) {
-      try {
-        appKit?.open?.();
-      } catch {
-        setErr("Connect your wallet first.");
-      }
+      try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
       return;
     }
-    if (!walletClient || !publicClient) {
-      setErr("Wallet or RPC is not ready.");
-      return;
-    }
+    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (owned) return;
-    if (isZeroAddress(marketAddress)) {
-      setErr("Market address is not set.");
-      return;
-    }
-    if (isZeroAddress(passAddress)) {
-      setErr("Pass address is not set.");
-      return;
-    }
+    if (isZeroAddress(marketAddress)) { setErr("Market address is not set."); return; }
+    if (isZeroAddress(passAddress)) { setErr("Pass address is not set."); return; }
 
     setBusy(true);
     setTxStage("waiting");
-
     try {
-      // Ensure correct chain
       const targetChainId = publicClient.chain?.id ?? chain?.id ?? currentChainId;
       if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
-        try {
-          await switchChainAsync({ chainId: targetChainId });
-        } catch {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr("Please switch to the correct network.");
-          return;
-        }
+        try { await switchChainAsync({ chainId: targetChainId }); }
+        catch { setBusy(false); setTxStage("hidden"); setErr("Please switch to the correct network."); return; }
       }
 
-      // Funds + allowance
       if (needsToken) {
-        if (isZeroAddress(payTokenAddress)) {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr("Payment token address is not set.");
-          return;
-        }
-        if (!hasFunds) {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
-          return;
-        }
+        if (isZeroAddress(payTokenAddress)) { setBusy(false); setTxStage("hidden"); setErr("Payment token address is not set."); return; }
+        if (!hasFunds) { setBusy(false); setTxStage("hidden"); setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`); return; }
 
         const allowance = (await publicClient.readContract({
           address: payTokenAddress,
@@ -532,7 +478,6 @@ export default function TierCard({
         }
       }
 
-      // BUY — use nonpayable
       const buySim = await publicClient.simulateContract({
         account: address,
         address: marketAddress,
@@ -547,7 +492,6 @@ export default function TierCard({
       const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
       if (receipt.status !== "success") throw new Error("Transaction reverted.");
 
-      // Verify
       const bal = (await publicClient.readContract({
         address: passAddress,
         abi: YEARNPASS1155_ABI,
@@ -558,7 +502,6 @@ export default function TierCard({
       const nowOwned = bal > 0n;
       setOwned(nowOwned);
 
-      // Refresh balance
       if (needsToken) {
         try {
           const newBal = (await publicClient.readContract({
@@ -574,16 +517,12 @@ export default function TierCard({
       if (nowOwned) {
         setTxStage("success");
         setCelebrate(true);
-        setTimeout(() => {
-          setTxStage("hidden");
-          setCelebrate(false);
-        }, 1800);
+        setTimeout(() => { setTxStage("hidden"); setCelebrate(false); }, 1800);
       } else {
         setTxStage("hidden");
       }
     } catch (e: any) {
-      const msg: string =
-        e?.shortMessage || e?.details || e?.message || "Transaction failed.";
+      const msg: string = e?.shortMessage || e?.details || e?.message || "Transaction failed.";
       setErr(msg);
       setTxStage("hidden");
     } finally {
@@ -592,31 +531,21 @@ export default function TierCard({
   };
 
   // Labels
-  const yourPriceLabel =
-    priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
+  const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
   const pubPriceLabel = `${formatUnits(pubPrice, payTokenDecimals)} ${payTokenSymbol}`;
   const wlPriceLabel = `${formatUnits(wlPrice, payTokenDecimals)} ${payTokenSymbol}`;
-  const youSave =
-    pubPrice > price
-      ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}`
-      : null;
+  const youSave = pubPrice > price ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}` : null;
 
   // Tilt + glare
   const { x, y, rotateX, rotateY, onMove } = useTilt3D();
   const xPct = useTransform(x, (v: number) => v * 100);
   const yPct = useTransform(y, (v: number) => v * 100);
-  const glare = useMotionTemplate`
-    radial-gradient(420px circle at ${xPct}% ${yPct}%, rgba(255,255,255,.12), transparent 45%)
-  `;
+  const glare = useMotionTemplate`radial-gradient(420px circle at ${xPct}% ${yPct}%, rgba(255,255,255,.12), transparent 45%)`;
 
   if (!visible) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 120, damping: 18 }}
-    >
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 120, damping: 18 }}>
       <div className="relative" onMouseMove={onMove} style={{ perspective: 1200 }}>
         <motion.div style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
           <HoloCard>
@@ -625,20 +554,14 @@ export default function TierCard({
             <Scanlines />
 
             {/* MEDIA */}
-            <div
-              className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass"
-              style={{ transform: "translateZ(30px)" }}
-            >
-              {/* Whitelist ribbon (contained) */}
+            <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass" style={{ transform: "translateZ(30px)" }}>
               <CornerRibbon show={isWl} />
 
-              {/* Balance sticker */}
               {needsToken && (
                 <div className="absolute top-3 right-3 z-30">
                   <div className="relative">
                     <div className="absolute -inset-2 blur-md bg-gradient-to-r from-indigo-400/25 to-cyan-300/20 rounded-full" />
                   </div>
-                  {/* Only show when CONNECTED, not owned, and short on funds */}
                   {connected && !owned && !hasFunds && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/15 text-red-100 ring-1 ring-red-400/30 text-[11px]">
                       <AlertCircle className="w-3 h-3" />
@@ -648,19 +571,32 @@ export default function TierCard({
                 </div>
               )}
 
-              {/* Base scene */}
               <div className="pointer-events-none absolute inset-0 z-10">
                 <MetaverseScene />
                 <div className="absolute inset-0 grid place-items-center">
-                  <motion.img
-                    src={YearnChamp}
-                    alt={name}
-                    loading="lazy"
-                    draggable={false}
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 20, ease: "linear" }}
-                    className="w-[64%] md:w-[60%] h-auto object-contain select-none opacity-[0.85]"
-                  />
+                  {mediaUrl ? (
+                    isVideo ? (
+                      <motion.video
+                        key={mediaUrl} src={mediaUrl} autoPlay loop muted playsInline
+                        className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95] rounded-lg"
+                        initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                      />
+                    ) : (
+                      <motion.img
+                        key={mediaUrl} src={mediaUrl} alt={name} loading="lazy" draggable={false}
+                        className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95]"
+                        initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                      />
+                    )
+                  ) : (
+                    <motion.div
+                      className="w-[70%] aspect-square rounded-xl bg-white/[0.06] ring-1 ring-white/10"
+                      initial={{ opacity: 0.4 }} animate={{ opacity: 0.6 }}
+                      transition={{ repeat: Infinity, duration: 1.4, repeatType: "reverse" }}
+                    />
+                  )}
                 </div>
                 <OrbitRings />
                 <motion.div aria-hidden className="absolute inset-0" style={{ backgroundImage: glare }} />
@@ -668,7 +604,6 @@ export default function TierCard({
                 <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent" />
               </div>
 
-              {/* Overlay: blur + confetti + dialog */}
               <OverlayLayer blur={txStage !== "hidden"}>
                 <ConfettiShower show={celebrate} />
                 <TxDialog stage={txStage} />
@@ -678,72 +613,43 @@ export default function TierCard({
             {/* CONTENT */}
             <div className="p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3
-                  className="text-white/90 font-semibold truncate tracking-wide"
-                  title={name}
-                >
-                  {name}
-                </h3>
-
+                <h3 className="text-white/90 font-semibold truncate tracking-wide" title={name}>{name}</h3>
                 <div className="flex items-center gap-2">
                   {connected && isWl && !owned && (
-                    <motion.span
-                      initial={{ y: -6, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-indigo-400/10 text-indigo-200 ring-1 ring-indigo-300/20"
-                      title="You're whitelisted for this tier"
-                    >
+                    <motion.span initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-indigo-400/10 text-indigo-200 ring-1 ring-indigo-300/20" title="You're whitelisted for this tier">
                       ✓ Whitelisted
                     </motion.span>
                   )}
                   {owned && (
-                    <motion.span
-                      initial={{ y: -6, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20"
-                    >
+                    <motion.span initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20">
                       <Shield className="w-3.5 h-3.5" /> Owned
                     </motion.span>
                   )}
                 </div>
               </div>
 
-              {/* Price area */}
               <div className="mt-2 flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <div className="absolute inset-0 blur-md bg-gradient-to-r from-indigo-400/20 to-cyan-300/20 rounded-full" />
                   <div className="relative rounded-full px-3 py-1 text-xs md:text-sm text-white/85 bg-black/40 ring-1 ring-white/10">
-                    <span className="mr-1 opacity-80">
-                      {connected && isWl ? "Your price" : connected ? "Price" : "Public price"}
-                    </span>
+                    <span className="mr-1 opacity-80">{connected && isWl ? "Your price" : connected ? "Price" : "Public price"}</span>
                     <strong className="font-semibold">{yourPriceLabel}</strong>
                   </div>
                 </div>
 
-                {/* Show public / WL references only when connected */}
                 {connected && isWl && (
-                  <span
-                    className={`text-[11px] md:text-xs ${
-                      pubPrice > price
-                        ? "line-through decoration-red-400/70 decoration-2 text-white/60"
-                        : "text-white/60"
-                    }`}
-                    title={`Public price: ${pubPriceLabel}`}
-                  >
+                  <span className={`text-[11px] md:text-xs ${pubPrice > price ? "line-through decoration-red-400/70 decoration-2 text-white/60" : "text-white/60"}`} title={`Public price: ${pubPriceLabel}`}>
                     Public: {pubPriceLabel}
                   </span>
                 )}
 
                 {connected && isWl && (
-                  <span
-                    className="text-[11px] md:text-xs text-indigo-200/90"
-                    title={`Whitelist price: ${wlPriceLabel}`}
-                  >
+                  <span className="text-[11px] md:text-xs text-indigo-200/90" title={`Whitelist price: ${wlPriceLabel}`}>
                     WL: {wlPriceLabel}
                   </span>
                 )}
 
-                {connected && isWl && youSave && pubPrice > price && (
+                {connected && isWl && pubPrice > price && (
                   <span className="text-[11px] md:text-xs inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20">
                     You save {youSave}
                   </span>
@@ -755,39 +661,31 @@ export default function TierCard({
                 )}
               </div>
 
-              {/* Subtle balance line (hidden until connected) */}
               {connected && needsToken && (
                 <div className="mt-1 text-[11px] md:text-xs text-white/60">
                   Balance: {format3(tokenBal, payTokenDecimals)} {payTokenSymbol}
                   {connected && !owned && !hasFunds && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/10 text-red-200 ring-1 ring-red-400/20">
-                      <AlertCircle className="w-3 h-3" />
-                      Insufficient {payTokenSymbol}
+                      <AlertCircle className="w-3 h-3" /> Insufficient {payTokenSymbol}
                     </span>
                   )}
                 </div>
               )}
 
-              {/* CTA */}
               <motion.button
                 onClick={buy}
                 disabled={owned || busy || (!hasFunds && needsToken)}
                 whileTap={{ scale: 0.985 }}
-                className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3
-                  text-sm font-semibold tracking-wide focus:outline-none
-                  ${
-                    owned
-                      ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
-                      : !hasFunds && needsToken
-                      ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                      : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
-                  }`}
+                className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none ${
+                  owned
+                    ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
+                    : !hasFunds && needsToken
+                    ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                    : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
+                }`}
               >
                 {!owned && (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
-                  />
+                  <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
                 )}
                 <span className="relative flex items-center gap-2">
                   {busy ? (
@@ -818,36 +716,21 @@ export default function TierCard({
                 </span>
               </motion.button>
 
-              {/* Inline error */}
               <AnimatePresence>
                 {err && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/10 text-red-200 ring-1 ring-red-400/20 px-3 py-2 text-xs"
-                  >
+                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/10 text-red-200 ring-1 ring-red-400/20 px-3 py-2 text-xs">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span className="leading-snug">{err}</span>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Success toast (mirrors dialog success) */}
               <AnimatePresence>
                 {celebrate && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    className="mt-3 text-center text-emerald-200/85 text-sm"
-                  >
-                    <div className="flex items-center justify-center gap-2">
-                      ✅ Added to your vault <Sparkles />
-                    </div>
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="mt-3 text-center text-emerald-200/85 text-sm">
+                    <div className="flex items-center justify-center gap-2">✅ Added to your vault <Sparkles /></div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
-                      You can see your NFT in your wallet
-                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                      You can see your NFT in your wallet <ExternalLink className="w-3.5 h-3.5 opacity-80" />
                     </div>
                   </motion.div>
                 )}
@@ -857,11 +740,23 @@ export default function TierCard({
         </motion.div>
       </div>
 
-      {/* safety keyframes */}
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes spin-rev { to { transform: rotate(-360deg); } }
-      `}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes spin-rev { to { transform: rotate(-360deg); } }`}</style>
+    </motion.div>
+  );
+}
+
+/* Small local component used above */
+function CornerRibbon({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 180, damping: 18 }} className="absolute top-2 left-2 z-30">
+      <div
+        className="px-3 py-1 text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-400 ring-1 ring-white/10 shadow rounded-sm"
+        style={{ clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0% 100%)" }}
+        title="You're whitelisted for this tier"
+      >
+        Whitelisted
+      </div>
     </motion.div>
   );
 }
