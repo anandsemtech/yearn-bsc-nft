@@ -44,6 +44,31 @@ import {
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
+/* ──────────────────────────────────────────────────────────────
+   Ensure Google Fonts <link> is present once (Orbitron + Audiowide)
+   ────────────────────────────────────────────────────────────── */
+const ensureOrbitronLink = (() => {
+  let done = false;
+  return () => {
+    if (done) return;
+    if (typeof document === "undefined") return;
+    const existing = document.querySelector<HTMLLinkElement>(
+      'link[data-font="orbitron-audiowide"]'
+    );
+    if (existing) {
+      done = true;
+      return;
+    }
+    const link = document.createElement("link");
+    link.setAttribute("rel", "stylesheet");
+    link.setAttribute("data-font", "orbitron-audiowide");
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Audiowide&display=swap";
+    document.head.appendChild(link);
+    done = true;
+  };
+})();
+
 /** Env overrides */
 const ENV_COLLECTION_URI =
   (import.meta as any)?.env?.VITE_COLLECTION_URI ||
@@ -210,6 +235,11 @@ export default function TierCard({
   tokenDecimals,
   tokenSymbol,
 }: Props) {
+  // Make sure the fonts are available
+  React.useEffect(() => {
+    ensureOrbitronLink();
+  }, []);
+
   const { isConnected, address, chain, status } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
@@ -545,7 +575,13 @@ export default function TierCard({
   if (!visible) return null;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 120, damping: 18 }}>
+    // Add extra space ONLY on the last card so footer won't overlap CTA
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 120, damping: 18 }}
+      className="last:mb-28 md:last:mb-32"
+    >
       <div className="relative" onMouseMove={onMove} style={{ perspective: 1200 }}>
         <motion.div style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
           <HoloCard>
@@ -613,7 +649,13 @@ export default function TierCard({
             {/* CONTENT */}
             <div className="p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-white/90 font-semibold truncate tracking-wide" title={name}>{name}</h3>
+                {/* NFT Name with Orbitron/Audiowide */}
+                <h3
+                  className="text-white/90 font-semibold truncate tracking-wide font-orbitron"
+                  title={name}
+                >
+                  {name}
+                </h3>
                 <div className="flex items-center gap-2">
                   {connected && isWl && !owned && (
                     <motion.span initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-indigo-400/10 text-indigo-200 ring-1 ring-indigo-300/20" title="You're whitelisted for this tier">
@@ -676,7 +718,7 @@ export default function TierCard({
                 onClick={buy}
                 disabled={owned || busy || (!hasFunds && needsToken)}
                 whileTap={{ scale: 0.985 }}
-                className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none ${
+                className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron ${
                   owned
                     ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
                     : !hasFunds && needsToken
@@ -740,7 +782,12 @@ export default function TierCard({
         </motion.div>
       </div>
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes spin-rev { to { transform: rotate(-360deg); } }`}</style>
+      {/* Local styles: Orbitron class + keyframes used above */}
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes spin-rev { to { transform: rotate(-360deg); } }
+        .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
+      `}</style>
     </motion.div>
   );
 }
