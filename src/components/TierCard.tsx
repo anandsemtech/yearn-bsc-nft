@@ -15,9 +15,11 @@ import {
   AlertCircle,
   ExternalLink,
   Wallet2,
+  Copy as CopyIcon,
+  ChevronDown,
 } from "lucide-react";
 import type { Address } from "viem";
-import { formatUnits, maxUint256, toHex } from "viem";
+import { formatUnits, toHex, getAddress } from "viem";
 import {
   useAccount,
   usePublicClient,
@@ -44,23 +46,15 @@ import {
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
-/* ──────────────────────────────────────────────────────────────
-   Ensure Google Fonts <link> is present once (Orbitron + Audiowide)
-   ────────────────────────────────────────────────────────────── */
+/* Fonts once */
 const ensureOrbitronLink = (() => {
   let done = false;
   return () => {
-    if (done) return;
-    if (typeof document === "undefined") return;
-    const existing = document.querySelector<HTMLLinkElement>(
-      'link[data-font="orbitron-audiowide"]'
-    );
-    if (existing) {
-      done = true;
-      return;
-    }
+    if (done || typeof document === "undefined") return;
+    const existing = document.querySelector('link[data-font="orbitron-audiowide"]');
+    if (existing) { done = true; return; }
     const link = document.createElement("link");
-    link.setAttribute("rel", "stylesheet");
+    link.rel = "stylesheet";
     link.setAttribute("data-font", "orbitron-audiowide");
     link.href =
       "https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Audiowide&display=swap";
@@ -80,10 +74,50 @@ const ID_FORMAT = (
   (import.meta as any)?.env?.VITE_ERC1155_ID_FORMAT || "hex"
 ).toLowerCase() as "hex" | "dec";
 
+const isMobile = () =>
+  typeof navigator !== "undefined" &&
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const isMetaMaskUA = () =>
+  typeof window !== "undefined" && (window as any)?.ethereum?.isMetaMask === true;
+
+const CopyField: React.FC<{ label: string; value: string; mono?: boolean }> = ({
+  label,
+  value,
+  mono,
+}) => {
+  const [copied, setCopied] = React.useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {}
+  };
+  return (
+    <div className="flex items-center gap-2 text-xs text-white/80">
+      <span className="opacity-70">{label}:</span>
+      <code
+        className={`px-1.5 py-[2px] rounded bg-white/5 ring-1 ring-white/10 ${
+          mono ? "font-mono" : ""
+        } max-w-full overflow-x-auto whitespace-nowrap`}
+      >
+        {value}
+      </code>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="inline-flex items-center gap-1 px-1.5 py-1 rounded ring-1 ring-white/10 hover:bg-white/10"
+      >
+        <CopyIcon className="w-3.5 h-3.5" /> {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+};
+
 type Props = {
   passAddress: Address;
   marketAddress: Address;
-  tier: { id: number; uri: string }; // uri may be empty; we’ll read on-chain
+  tier: { id: number; uri: string };
   tokenAddress?: Address;
   tokenDecimals?: number;
   tokenSymbol?: string;
@@ -94,7 +128,7 @@ const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 /** Format bigint token to exactly 3 decimals */
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
-  const [i, d = ""] = str.split(".");
+  const [i, d = ""] = str.split("."); // ← fixed typo
   const dec = (d + "000").slice(0, 3);
   return `${i}.${dec}`;
 };
@@ -111,16 +145,11 @@ const idHex64 = (n: number) => toHex(BigInt(n)).slice(2).toLowerCase().padStart(
 const resolveTokenJsonUrl = (template: string, id: number): string => {
   if (!template) return "";
   let out = template;
-
-  // Strict placeholder
-  if (/\{idhex\}/i.test(out)) out = out.replace(/\{idhex\}/gi, idHex64(id));
-
-  // Common placeholder
+  if (/{idhex}/i.test(out)) out = out.replace(/{idhex}/gi, idHex64(id));
   if (out.includes("{id}")) {
     const rep = ID_FORMAT === "dec" ? String(id) : idHex64(id);
     out = out.replace("{id}", rep);
   }
-
   return out;
 };
 
@@ -133,14 +162,15 @@ type NftMeta = {
   attributes?: Array<{ trait_type?: string; value?: string }>;
 };
 
-/* ──────────────────────────────────────────────────────────────
-   Tx Dialog
-   ────────────────────────────────────────────────────────────── */
+/* Tx dialog */
 type TxStage = "hidden" | "waiting" | "confirming" | "success";
 const stageCopy: Record<TxStage, { title: string; subtitle: string }> = {
   hidden: { title: "", subtitle: "" },
   waiting: { title: "Waiting…", subtitle: "Approve payment token if prompted" },
-  confirming: { title: "Confirming…", subtitle: "Your transaction is being confirmed on-chain" },
+  confirming: {
+    title: "Confirming…",
+    subtitle: "Your transaction is being confirmed on-chain",
+  },
   success: { title: "Success!", subtitle: "NFT is added to your wallet" },
 };
 
@@ -153,31 +183,51 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
       <motion.div
         key="tx-dialog"
         className="absolute inset-0 grid place-items-center z-[60] pointer-events-none"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
       >
         <motion.div
           className={`pointer-events-auto relative mx-4 w-full max-w-sm rounded-2xl ${
-            isSuccess ? "bg-black/40 ring-1 ring-emerald-300/20" : "bg-[#0b0f17]/85 ring-1 ring-white/10"
+            isSuccess
+              ? "bg-black/40 ring-1 ring-emerald-300/20"
+              : "bg-[#0b0f17]/85 ring-1 ring-white/10"
           } p-5 text-center`}
-          initial={{ scale: 0.96, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 4 }}
+          initial={{ scale: 0.96, y: 8 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.98, y: 4 }}
           transition={{ type: "spring", stiffness: 200, damping: 20 }}
         >
           <div className="flex items-center justify-center mb-3">
-            {isSuccess ? <Check className="w-6 h-6 text-emerald-300" /> : <Loader2 className="w-6 h-6 text-white/85 animate-spin" />}
+            {isSuccess ? (
+              <Check className="w-6 h-6 text-emerald-300" />
+            ) : (
+              <Loader2 className="w-6 h-6 text-white/85 animate-spin" />
+            )}
           </div>
-          <h4 className={`font-semibold ${isSuccess ? "text-emerald-200" : "text-white/90"}`}>{title}</h4>
+          <h4
+            className={`font-semibold ${
+              isSuccess ? "text-emerald-200" : "text-white/90"
+            }`}
+          >
+            {title}
+          </h4>
           <p className="mt-1 text-sm text-white/70">{subtitle}</p>
-          {isSuccess && <p className="mt-2 text-xs text-emerald-200/85">You can see your NFT in your wallet.</p>}
+          {isSuccess && (
+            <p className="mt-2 text-xs text-emerald-200/85">
+              You can see your NFT in your wallet.
+            </p>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>
   );
 };
 
-/* ──────────────────────────────────────────────────────────────
-   Confetti + Overlay
-   ────────────────────────────────────────────────────────────── */
-type ConfettiPiece = { id: number; x: number; y: number; r: number; vx: number; vy: number; s: number; d: number; delay: number; };
+/* Confetti */
+type ConfettiPiece = {
+  id: number; x: number; y: number; r: number; vx: number; vy: number; s: number; d: number; delay: number;
+};
 const makeConfetti = (count = 110): ConfettiPiece[] =>
   Array.from({ length: count }).map((_, i) => {
     const angle = Math.random() * Math.PI - Math.PI / 2;
@@ -204,10 +254,21 @@ const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
         <motion.div className="absolute inset-0 overflow-hidden z-[50] pointer-events-none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           {pieces.map((p) => (
             <motion.span
-              key={p.id} className="absolute block"
-              style={{ left: `${p.x}%`, top: `${p.y}%`, width: 8, height: 10, transformOrigin: "center", background: "white", borderRadius: 2, boxShadow: "0 0 8px rgba(255,255,255,.15)" }}
+              key={p.id}
+              className="absolute block"
+              style={{
+                left: `${p.x}%`, top: `${p.y}%`, width: 8, height: 10,
+                transformOrigin: "center", background: "white", borderRadius: 2,
+                boxShadow: "0 0 8px rgba(255,255,255,.15)",
+              }}
               initial={{ opacity: 0, scale: 0.4, rotate: p.r }}
-              animate={{ opacity: [0, 1, 1, 0], x: [0, p.vx * 0.35, p.vx * 0.7], y: [0, p.vy * 0.5, p.vy], rotate: [p.r, p.r + 360], scale: [p.s, p.s * 0.9, p.s * 0.8] }}
+              animate={{
+                opacity: [0, 1, 1, 0],
+                x: [0, p.vx * 0.35, p.vx * 0.7],
+                y: [0, p.vy * 0.5, p.vy],
+                rotate: [p.r, p.r + 360],
+                scale: [p.s, p.s * 0.9, p.s * 0.8],
+              }}
               transition={{ delay: p.delay, duration: p.d, ease: "easeOut" }}
             />
           ))}
@@ -235,10 +296,7 @@ export default function TierCard({
   tokenDecimals,
   tokenSymbol,
 }: Props) {
-  // Make sure the fonts are available
-  React.useEffect(() => {
-    ensureOrbitronLink();
-  }, []);
+  React.useEffect(() => { ensureOrbitronLink(); }, []);
 
   const { isConnected, address, chain, status } = useAccount();
   const publicClient = usePublicClient();
@@ -246,51 +304,63 @@ export default function TierCard({
   const { switchChainAsync } = useSwitchChain();
   const currentChainId = useChainId();
 
-  // Preferred payment token setup
+  // Payment token env
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
   const envDecimals = Number(YEARN_TOKEN_DECIMALS);
   const payTokenDecimals = typeof tokenDecimals === "number" ? tokenDecimals : Number.isFinite(envDecimals) ? envDecimals : 18;
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
   const connected = isConnected && !!address;
 
-  // Metadata state
+  // State
   const [meta, setMeta] = React.useState<NftMeta | null>(null);
   const [mediaUrl, setMediaUrl] = React.useState<string | undefined>(undefined);
   const [isVideo, setIsVideo] = React.useState(false);
   const [name, setName] = React.useState(`Pass #${tier.id}`);
   const [owned, setOwned] = React.useState(false);
 
-  // Pricing / WL
   const [price, setPrice] = React.useState<bigint>(0n);
   const [pubPrice, setPubPrice] = React.useState<bigint>(0n);
   const [wlPrice, setWlPrice] = React.useState<bigint>(0n);
   const [isWl, setIsWl] = React.useState(false);
 
-  // Wallet token balance
   const [tokenBal, setTokenBal] = React.useState<bigint>(0n);
+  const [allowance, setAllowance] = React.useState<bigint>(0n);
 
-  // UI states
   const [busy, setBusy] = React.useState(false);
   const [celebrate, setCelebrate] = React.useState(false);
   const [visible, setVisible] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [txStage, setTxStage] = React.useState<TxStage>("hidden");
 
-  // Flags
+  const [showImportHelp, setShowImportHelp] = React.useState(false);
+
   const priceIsFree = price === 0n;
   const needsToken = !priceIsFree;
   const hasFunds = priceIsFree || tokenBal >= price;
 
-  /** Load metadata (reads on-chain base uri if per-tier uri is empty) */
+  /** Legacy chain detection & gas helpers */
+  const isLegacyChain = React.useCallback(async () => {
+    try {
+      const latest = await publicClient!.getBlock({ blockTag: "latest" });
+      return !latest.baseFeePerGas;
+    } catch {
+      return true;
+    }
+  }, [publicClient]);
+
+  const legacyTx = React.useCallback(async () => {
+    const gasPrice = await publicClient!.getGasPrice();
+    return { type: "legacy" as const, gasPrice };
+  }, [publicClient]);
+
+  /** Metadata */
   React.useEffect(() => {
     let aborted = false;
     const ctrl = new AbortController();
-
-    const pickGateway = (u?: string) => (u ? ipfsToHttp(u) || u : undefined);
+    const pick = (u?: string) => (u ? ipfsToHttp(u) || u : undefined);
 
     (async () => {
       try {
-        // 1) On-chain via uri(id) if local tier.uri is empty
         let base = tier.uri?.trim() || "";
         if (!base && publicClient) {
           try {
@@ -300,23 +370,16 @@ export default function TierCard({
               functionName: "uri",
               args: [BigInt(tier.id)],
             })) as string;
-          } catch {
-            /* ignore */
-          }
+          } catch {}
         }
-
-        // 2) Fallback to env override
-        const chosenBase = (base && base.length > 0 ? base : ENV_COLLECTION_URI) || "";
-
-        const tokenJsonUri = resolveTokenJsonUrl(chosenBase, tier.id);
-        if (!tokenJsonUri) return;
-
-        const jsonUrl = pickGateway(tokenJsonUri);
+        const chosen = (base && base.length > 0 ? base : ENV_COLLECTION_URI) || "";
+        const tokenJson = resolveTokenJsonUrl(chosen, tier.id);
+        if (!tokenJson) return;
+        const jsonUrl = pick(tokenJson);
         if (!jsonUrl) return;
 
         const res = await fetch(jsonUrl, { signal: ctrl.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
         const data = (await res.json()) as NftMeta;
         if (aborted) return;
 
@@ -324,26 +387,21 @@ export default function TierCard({
         setName(data?.name || `Pass #${tier.id}`);
 
         const media = data?.animation_url || data?.image;
-        const mediaHttp = pickGateway(media);
-        setMediaUrl(mediaHttp);
-
+        const http = pick(media);
+        setMediaUrl(http);
         const isVid =
-          !!mediaHttp &&
-          (/\.(mp4|webm|mov|ogv)$/i.test(mediaHttp) ||
-            (!!data?.animation_url && !/\.(png|jpe?g|gif|webp|svg)$/i.test(mediaHttp)));
+          !!http &&
+          (/\.(mp4|webm|mov|ogv)$/i.test(http) ||
+            (!!data?.animation_url &&
+              !/\.(png|jpe?g|gif|webp|svg)$/i.test(http)));
         setIsVideo(isVid);
-      } catch {
-        /* keep placeholder */
-      }
+      } catch {}
     })();
 
-    return () => {
-      aborted = true;
-      ctrl.abort();
-    };
+    return () => { aborted = true; ctrl.abort(); };
   }, [tier.id, tier.uri, passAddress, publicClient]);
 
-  /** Ownership + prices + WL */
+  /** Ownership / price / WL / allowance */
   React.useEffect(() => {
     let stop = false;
     (async () => {
@@ -356,47 +414,37 @@ export default function TierCard({
             functionName: "pricePublic",
             args: [BigInt(tier.id)],
           })) as bigint;
-
           if (!stop) {
-            setOwned(false);
-            setIsWl(false);
-            setWlPrice(0n);
-            setPubPrice(pPub);
-            setPrice(pPub);
+            setOwned(false); setIsWl(false); setWlPrice(0n);
+            setPubPrice(pPub); setPrice(pPub); setAllowance(0n);
           }
           return;
         }
 
-        const [bal, pYour, wl, pPub, pWl] = await Promise.all([
+        const [bal, pYour, wl, pPub, pWl, a] = await Promise.all([
           publicClient.readContract({
-            address: passAddress,
-            abi: YEARNPASS1155_ABI,
-            functionName: "balanceOf",
+            address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf",
             args: [address, BigInt(tier.id)],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "priceOf",
+            address: marketAddress, abi: MARKET_ABI, functionName: "priceOf",
             args: [BigInt(tier.id), address],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "isWhitelisted",
+            address: marketAddress, abi: MARKET_ABI, functionName: "isWhitelisted",
             args: [BigInt(tier.id), address],
           }) as Promise<boolean>,
           publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "pricePublic",
+            address: marketAddress, abi: MARKET_ABI, functionName: "pricePublic",
             args: [BigInt(tier.id)],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "priceWhitelist",
+            address: marketAddress, abi: MARKET_ABI, functionName: "priceWhitelist",
             args: [BigInt(tier.id)],
+          }) as Promise<bigint>,
+          publicClient.readContract({
+            address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+            args: [address, marketAddress],
           }) as Promise<bigint>,
         ]);
 
@@ -406,27 +454,25 @@ export default function TierCard({
           setIsWl(wl);
           setPubPrice(pPub);
           setWlPrice(pWl);
+          setAllowance(a);
         }
       } catch {
         if (!stop) setErr("Unable to fetch price/whitelist right now.");
       }
     })();
     return () => { stop = true; };
-  }, [address, publicClient, tier.id, passAddress, marketAddress]);
+  }, [address, publicClient, tier.id, passAddress, marketAddress, payTokenAddress]);
 
   /** Reset on disconnect */
   React.useEffect(() => {
     if (status === "disconnected") {
-      setOwned(false);
-      setIsWl(false);
-      setTokenBal(0n);
-      setCelebrate(false);
-      setTxStage("hidden");
-      setErr(null);
+      setOwned(false); setIsWl(false); setTokenBal(0n);
+      setCelebrate(false); setTxStage("hidden"); setErr(null);
+      setShowImportHelp(false); setAllowance(0n);
     }
   }, [status]);
 
-  /** Load payment token balance */
+  /** Token balance */
   React.useEffect(() => {
     let stop = false;
     (async () => {
@@ -436,10 +482,7 @@ export default function TierCard({
           return;
         }
         const bal = (await publicClient.readContract({
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [address],
+          address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address],
         })) as bigint;
         if (!stop) setTokenBal(bal);
       } catch {
@@ -449,7 +492,7 @@ export default function TierCard({
     return () => { stop = true; };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
 
-  /** Filter visibility */
+  /** Filter */
   React.useEffect(() => {
     const apply = (mode: NftFilter) => setVisible(mode === "all" ? true : owned);
     const initial = (localStorage.getItem("nft.filter") as NftFilter) || "all";
@@ -462,8 +505,91 @@ export default function TierCard({
     return () => window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
   }, [owned]);
 
-  /** Buy flow */
-  const buy = async () => {
+  /** Approve (exact), with legacy gas + explicit gas via estimateContractGas */
+  const doApprove = React.useCallback(async () => {
+    setErr(null);
+    if (!connected || !address) {
+      try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
+      return;
+    }
+    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
+    if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
+
+    setBusy(true);
+    setTxStage("waiting");
+    try {
+      const required = price;
+
+      // current allowance
+      let a = (await publicClient.readContract({
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        args: [address, marketAddress],
+      })) as bigint;
+
+      const legacy = await isLegacyChain();
+      const legacyMeta = legacy ? await legacyTx() : undefined;
+
+      if (a > 0n && a < required) {
+        // reset to 0
+        const gas0 = await publicClient.estimateContractGas({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, 0n],
+          ...(legacyMeta ?? {}),
+        });
+        const { request } = await publicClient.simulateContract({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, 0n],
+          ...(legacyMeta ?? {}),
+        });
+        const h0 = await walletClient.writeContract({ ...request, gas: gas0 });
+        await publicClient.waitForTransactionReceipt({ hash: h0 });
+        a = 0n;
+      }
+
+      if (a < required) {
+        const gas = await publicClient.estimateContractGas({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, required],
+          ...(legacyMeta ?? {}),
+        });
+        const { request } = await publicClient.simulateContract({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, required],
+          ...(legacyMeta ?? {}),
+        });
+        const hash = await walletClient.writeContract({ ...request, gas });
+        await publicClient.waitForTransactionReceipt({ hash });
+      }
+
+      const aNew = (await publicClient.readContract({
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        args: [address, marketAddress],
+      })) as bigint;
+
+      setAllowance(aNew);
+      setTxStage("hidden");
+    } catch (e: any) {
+      setErr(e?.shortMessage || e?.details || e?.message || "Approve failed.");
+      setTxStage("hidden");
+    } finally {
+      setBusy(false);
+    }
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, isLegacyChain, legacyTx]);
+
+  /** Buy (legacy gas + explicit gas via estimateContractGas + watchdog) */
+  const doBuy = React.useCallback(async () => {
     setErr(null);
 
     if (!connected || !address) {
@@ -484,48 +610,53 @@ export default function TierCard({
         catch { setBusy(false); setTxStage("hidden"); setErr("Please switch to the correct network."); return; }
       }
 
-      if (needsToken) {
-        if (isZeroAddress(payTokenAddress)) { setBusy(false); setTxStage("hidden"); setErr("Payment token address is not set."); return; }
-        if (!hasFunds) { setBusy(false); setTxStage("hidden"); setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`); return; }
-
-        const allowance = (await publicClient.readContract({
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "allowance",
-          args: [address, marketAddress],
-        })) as bigint;
-
-        if (allowance < price) {
-          const approveSim = await publicClient.simulateContract({
-            account: address,
-            address: payTokenAddress,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [marketAddress, maxUint256],
-          });
-          const approveHash = await walletClient.writeContract(approveSim.request);
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
-        }
+      const currentPrice = (await publicClient.readContract({
+        address: marketAddress, abi: MARKET_ABI,
+        functionName: address ? "priceOf" : "pricePublic",
+        args: address ? [BigInt(tier.id), address] : [BigInt(tier.id)],
+      })) as bigint;
+      setPrice(currentPrice);
+      if (needsToken && tokenBal < currentPrice) {
+        setBusy(false); setTxStage("hidden");
+        setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
+        return;
       }
 
-      const buySim = await publicClient.simulateContract({
+      const legacy = await isLegacyChain();
+      const legacyMeta = legacy ? await legacyTx() : undefined;
+
+      const gas = await publicClient.estimateContractGas({
         account: address,
         address: marketAddress,
         abi: MARKET_ABI,
         functionName: "buy",
         args: [BigInt(tier.id), address],
+        ...(legacyMeta ?? {}),
+      });
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: marketAddress,
+        abi: MARKET_ABI,
+        functionName: "buy",
+        args: [BigInt(tier.id), address],
+        ...(legacyMeta ?? {}),
       });
 
-      const buyHash = await walletClient.writeContract(buySim.request);
+      const send = walletClient.writeContract({ ...request, gas });
+      const watchdog = new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("Wallet didn’t open. Tap Buy again.")), 15000)
+      );
+      const buyHash = await Promise.race([send, watchdog]);
+
       setTxStage("confirming");
 
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: buyHash as `0x${string}`,
+      });
       if (receipt.status !== "success") throw new Error("Transaction reverted.");
 
       const bal = (await publicClient.readContract({
-        address: passAddress,
-        abi: YEARNPASS1155_ABI,
-        functionName: "balanceOf",
+        address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf",
         args: [address, BigInt(tier.id)],
       })) as bigint;
 
@@ -535,9 +666,7 @@ export default function TierCard({
       if (needsToken) {
         try {
           const newBal = (await publicClient.readContract({
-            address: payTokenAddress,
-            abi: ERC20_ABI,
-            functionName: "balanceOf",
+            address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf",
             args: [address],
           })) as bigint;
           setTokenBal(newBal);
@@ -547,18 +676,19 @@ export default function TierCard({
       if (nowOwned) {
         setTxStage("success");
         setCelebrate(true);
+        if (isMobile()) setShowImportHelp(true);
         setTimeout(() => { setTxStage("hidden"); setCelebrate(false); }, 1800);
       } else {
         setTxStage("hidden");
       }
     } catch (e: any) {
-      const msg: string = e?.shortMessage || e?.details || e?.message || "Transaction failed.";
+      const msg: string = e?.message || e?.shortMessage || e?.details || "Transaction failed.";
       setErr(msg);
       setTxStage("hidden");
     } finally {
       setBusy(false);
     }
-  };
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, isLegacyChain, legacyTx]);
 
   // Labels
   const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
@@ -574,13 +704,18 @@ export default function TierCard({
 
   if (!visible) return null;
 
+  const checksumPass = React.useMemo(() => {
+    try { return getAddress(passAddress); } catch { return passAddress; }
+  }, [passAddress]);
+  const tokenIdDec = String(tier.id);
+  const tokenIdHex = `0x${idHex64(tier.id)}`;
+
   return (
-    // Add extra space ONLY on the last card so footer won't overlap CTA
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
-      className="last:mb-28 md:last:mb-32"
+      className="scroll-mt-24 last:mb-28 md:last:mb-32"
     >
       <div className="relative" onMouseMove={onMove} style={{ perspective: 1200 }}>
         <motion.div style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
@@ -590,9 +725,11 @@ export default function TierCard({
             <Scanlines />
 
             {/* MEDIA */}
-            <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass" style={{ transform: "translateZ(30px)" }}>
+            <div
+              className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass"
+              style={{ transform: "translateZ(30px)", contain: "content" }}
+            >
               <CornerRibbon show={isWl} />
-
               {needsToken && (
                 <div className="absolute top-3 right-3 z-30">
                   <div className="relative">
@@ -607,29 +744,41 @@ export default function TierCard({
                 </div>
               )}
 
-              <div className="pointer-events-none absolute inset-0 z-10">
+              <div className="pointer-events-none absolute inset-0 z-10 [content-visibility:auto] [contain-intrinsic-size:320px_240px]">
                 <MetaverseScene />
                 <div className="absolute inset-0 grid place-items-center">
                   {mediaUrl ? (
                     isVideo ? (
                       <motion.video
-                        key={mediaUrl} src={mediaUrl} autoPlay loop muted playsInline
+                        key={mediaUrl}
+                        src={mediaUrl}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
                         className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95] rounded-lg"
-                        initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                        initial={{ scale: 0.98, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
                     ) : (
                       <motion.img
-                        key={mediaUrl} src={mediaUrl} alt={name} loading="lazy" draggable={false}
+                        key={mediaUrl}
+                        src={mediaUrl}
+                        alt={name}
+                        loading="lazy"
+                        draggable={false}
                         className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95]"
-                        initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                        initial={{ scale: 0.98, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
                     )
                   ) : (
                     <motion.div
                       className="w-[70%] aspect-square rounded-xl bg-white/[0.06] ring-1 ring-white/10"
-                      initial={{ opacity: 0.4 }} animate={{ opacity: 0.6 }}
+                      initial={{ opacity: 0.4 }}
+                      animate={{ opacity: 0.6 }}
                       transition={{ repeat: Infinity, duration: 1.4, repeatType: "reverse" }}
                     />
                   )}
@@ -649,21 +798,26 @@ export default function TierCard({
             {/* CONTENT */}
             <div className="p-4">
               <div className="flex items-center justify-between gap-3">
-                {/* NFT Name with Orbitron/Audiowide */}
-                <h3
-                  className="text-white/90 font-semibold truncate tracking-wide font-orbitron"
-                  title={name}
-                >
+                <h3 className="text-white/90 font-semibold truncate tracking-wide font-orbitron" title={name}>
                   {name}
                 </h3>
                 <div className="flex items-center gap-2">
                   {connected && isWl && !owned && (
-                    <motion.span initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-indigo-400/10 text-indigo-200 ring-1 ring-indigo-300/20" title="You're whitelisted for this tier">
+                    <motion.span
+                      initial={{ y: -6, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-indigo-400/10 text-indigo-200 ring-1 ring-indigo-300/20"
+                      title="You're whitelisted for this tier"
+                    >
                       ✓ Whitelisted
                     </motion.span>
                   )}
                   {owned && (
-                    <motion.span initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20">
+                    <motion.span
+                      initial={{ y: -6, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20"
+                    >
                       <Shield className="w-3.5 h-3.5" /> Owned
                     </motion.span>
                   )}
@@ -674,13 +828,22 @@ export default function TierCard({
                 <div className="relative">
                   <div className="absolute inset-0 blur-md bg-gradient-to-r from-indigo-400/20 to-cyan-300/20 rounded-full" />
                   <div className="relative rounded-full px-3 py-1 text-xs md:text-sm text-white/85 bg-black/40 ring-1 ring-white/10">
-                    <span className="mr-1 opacity-80">{connected && isWl ? "Your price" : connected ? "Price" : "Public price"}</span>
+                    <span className="mr-1 opacity-80">
+                      {connected && isWl ? "Your price" : connected ? "Price" : "Public price"}
+                    </span>
                     <strong className="font-semibold">{yourPriceLabel}</strong>
                   </div>
                 </div>
 
                 {connected && isWl && (
-                  <span className={`text-[11px] md:text-xs ${pubPrice > price ? "line-through decoration-red-400/70 decoration-2 text-white/60" : "text-white/60"}`} title={`Public price: ${pubPriceLabel}`}>
+                  <span
+                    className={`text-[11px] md:text-xs ${
+                      pubPrice > price
+                        ? "line-through decoration-red-400/70 decoration-2 text-white/60"
+                        : "text-white/60"
+                    }`}
+                    title={`Public price: ${pubPriceLabel}`}
+                  >
                     Public: {pubPriceLabel}
                   </span>
                 )}
@@ -714,53 +877,87 @@ export default function TierCard({
                 </div>
               )}
 
-              <motion.button
-                onClick={buy}
-                disabled={owned || busy || (!hasFunds && needsToken)}
-                whileTap={{ scale: 0.985 }}
-                className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron ${
-                  owned
-                    ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
-                    : !hasFunds && needsToken
-                    ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                    : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
-                }`}
-              >
-                {!owned && (
-                  <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
-                )}
-                <span className="relative flex items-center gap-2">
-                  {busy ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
-                    </>
-                  ) : owned ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-300/90" /> Claimed
-                    </>
-                  ) : !connected ? (
-                    <>
-                      <Wallet2 className="w-4 h-4" /> Connect to Buy
-                    </>
-                  ) : priceIsFree ? (
-                    <>
-                      <SparkIcon className="w-4 h-4" /> Claim Free NFT
-                    </>
-                  ) : !hasFunds && needsToken ? (
-                    <>
-                      <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy Now
-                    </>
+              {/* Split Approve → Buy for mobile reliability */}
+              {needsToken && allowance < price ? (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={doApprove}
+                    disabled={busy}
+                    className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
+                  >
+                    {busy ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Approving…
+                      </span>
+                    ) : (
+                      "Approve"
+                    )}
+                  </button>
+                  <button
+                    disabled
+                    className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                    title="Approve first"
+                  >
+                    Buy
+                  </button>
+                </div>
+              ) : (
+                <motion.button
+                  onClick={doBuy}
+                  disabled={owned || busy || (!hasFunds && needsToken)}
+                  whileTap={{ scale: 0.985 }}
+                  className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
+                    owned
+                      ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
+                      : !hasFunds && needsToken
+                      ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                      : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
+                  }`}
+                >
+                  {!owned && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
+                    />
                   )}
-                </span>
-              </motion.button>
+                  <span className="relative flex items-center gap-2">
+                    {busy ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
+                      </>
+                    ) : owned ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-300/90" /> Claimed
+                      </>
+                    ) : !connected ? (
+                      <>
+                        <Wallet2 className="w-4 h-4" /> Connect to Buy
+                      </>
+                    ) : priceIsFree ? (
+                      <>
+                        <SparkIcon className="w-4 h-4" /> Claim Free NFT
+                      </>
+                    ) : !hasFunds && needsToken ? (
+                      <>
+                        <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
+                      </>
+                    )}
+                  </span>
+                </motion.button>
+              )}
 
               <AnimatePresence>
                 {err && (
-                  <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/10 text-red-200 ring-1 ring-red-400/20 px-3 py-2 text-xs">
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/10 text-red-200 ring-1 ring-red-400/20 px-3 py-2 text-xs"
+                  >
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span className="leading-snug">{err}</span>
                   </motion.div>
@@ -769,34 +966,100 @@ export default function TierCard({
 
               <AnimatePresence>
                 {celebrate && (
-                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="mt-3 text-center text-emerald-200/85 text-sm">
-                    <div className="flex items-center justify-center gap-2">✅ Added to your vault <Sparkles /></div>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    className="mt-3 text-center text-emerald-200/85 text-sm"
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      ✅ Added to your vault <Sparkles />
+                    </div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
-                      You can see your NFT in your wallet <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                      You can see your NFT in your wallet{" "}
+                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {/* MetaMask Mobile Import Helper */}
+              {isMobile() && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportHelp((s) => !s)}
+                    className="w-full inline-flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
+                  >
+                    <span className="text-white/80">
+                      {owned
+                        ? "How to add this NFT to MetaMask"
+                        : "Don’t see your NFT in MetaMask Mobile? Import it manually"}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 transition ${
+                        showImportHelp ? "rotate-180" : "rotate-0"
+                      }`}
+                    />
+                  </button>
+
+                  {/* CSS accordion (no layout jumps) */}
+                  <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
+                    <div className="px-3 pt-3 pb-2 text-[12px] text-white/75 space-y-2">
+                      <p>
+                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. You can
+                        import it manually:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1">
+                        <li>Open <strong>MetaMask</strong> ➜ <strong>NFTs</strong> tab.</li>
+                        <li>Tap <strong>Import NFTs</strong>.</li>
+                        <li>Paste the <em>Contract Address</em> and <em>Token ID</em>.</li>
+                      </ol>
+                      <div className="mt-2 space-y-2">
+                        <CopyField label="Contract" value={checksumPass} />
+                        <CopyField label="Token ID (decimal)" value={tokenIdDec} mono />
+                        <CopyField label="Token ID (hex)" value={tokenIdHex} mono />
+                      </div>
+                      {isMetaMaskUA() && isMobile() && (
+                        <p className="pt-1 opacity-80">
+                          Tip: After import, pull down to refresh if it doesn’t appear
+                          immediately.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </HoloCard>
         </motion.div>
       </div>
 
-      {/* Local styles: Orbitron class + keyframes used above */}
+      {/* Local styles */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes spin-rev { to { transform: rotate(-360deg); } }
         .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
+
+        /* Accordion (no layout thrash) */
+        .acc { overflow: hidden; transition: max-height 0.22s ease, opacity 0.22s ease; will-change: max-height, opacity; }
+        .acc-closed { max-height: 0; opacity: 0; }
+        .acc-open   { max-height: 360px; opacity: 1; }
       `}</style>
     </motion.div>
   );
 }
 
-/* Small local component used above */
+/* Corner ribbon */
 function CornerRibbon({ show }: { show: boolean }) {
   if (!show) return null;
   return (
-    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 180, damping: 18 }} className="absolute top-2 left-2 z-30">
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 180, damping: 18 }}
+      className="absolute top-2 left-2 z-30"
+    >
       <div
         className="px-3 py-1 text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-400 ring-1 ring-white/10 shadow rounded-sm"
         style={{ clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0% 100%)" }}
