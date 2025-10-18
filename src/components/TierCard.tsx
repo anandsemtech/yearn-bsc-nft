@@ -128,8 +128,15 @@ const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 /** Format bigint token to exactly 3 decimals */
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
-  const [i, d = ""] = str.split("."); // ← fixed stray quote
+  const [i, d = ""] = str.split(".");
   const dec = (d + "000").slice(0, 3);
+  return `${i}.${dec}`;
+};
+/** Format native balance/fee to 5 dp (for gas) */
+const format5 = (value: bigint, decimals = 18) => {
+  const str = formatUnits(value, decimals);
+  const [i, d = ""] = str.split(".");
+  const dec = (d + "00000").slice(0, 5);
   return `${i}.${dec}`;
 };
 
@@ -334,6 +341,12 @@ export default function TierCard({
 
   const [showImportHelp, setShowImportHelp] = React.useState(false);
 
+  /* NEW: native gas fee + balance tracking */
+  const [nativeBal, setNativeBal] = React.useState<bigint>(0n);
+  const [feeApprove, setFeeApprove] = React.useState<bigint | null>(null);
+  const [feeBuy, setFeeBuy] = React.useState<bigint | null>(null);
+  const feeSymbol = chain?.nativeCurrency?.symbol || "BNB";
+
   const priceIsFree = price === 0n;
   const needsToken = !priceIsFree;
   const hasFunds = priceIsFree || tokenBal >= price;
@@ -348,10 +361,133 @@ export default function TierCard({
     }
   }, [publicClient]);
 
-  const legacyTx = React.useCallback(async () => {
-    const gasPrice = await publicClient!.getGasPrice();
-    return { type: "legacy" as const, gasPrice };
+  const gasPriceWei = React.useCallback(async () => {
+    try {
+      // Works fine on legacy & EIP-1559 chains as a quick estimate
+      return await publicClient!.getGasPrice();
+    } catch {
+      return 0n;
+    }
   }, [publicClient]);
+
+  const legacyTx = React.useCallback(async () => {
+    const gasPrice = await gasPriceWei();
+    return { type: "legacy" as const, gasPrice };
+  }, [gasPriceWei]);
+
+  /* ---------- helpers to estimate native fee (gasLimit * gasPrice) ---------- */
+  const estimateApproveFee = React.useCallback(async (): Promise<bigint | null> => {
+    try {
+      if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress)) return null;
+      const need = price;
+      let sum = 0n;
+
+      const gprice = await gasPriceWei();
+      const legacy = await isLegacyChain();
+      const legacyMeta = legacy ? await legacyTx() : undefined;
+
+      // current allowance
+      const a = (await publicClient.readContract({
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        args: [address, marketAddress],
+      })) as bigint;
+
+      // if allowance needs reset to 0 first
+      if (a > 0n && a < need) {
+        const gl0 = await publicClient.estimateContractGas({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, 0n],
+          ...(legacyMeta ?? {}),
+        });
+        sum += gl0 * gprice;
+      }
+      if (a < need) {
+        const gl = await publicClient.estimateContractGas({
+          account: address,
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [marketAddress, need],
+          ...(legacyMeta ?? {}),
+        });
+        sum += gl * gprice;
+      }
+      return sum || 0n;
+    } catch {
+      return null;
+    }
+  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, gasPriceWei, isLegacyChain, legacyTx]);
+
+  const estimateBuyFee = React.useCallback(async (): Promise<bigint | null> => {
+    try {
+      if (!connected || !address || !publicClient || isZeroAddress(marketAddress)) return null;
+      const gprice = await gasPriceWei();
+      const legacy = await isLegacyChain();
+      const legacyMeta = legacy ? await legacyTx() : undefined;
+      const gl = await publicClient.estimateContractGas({
+        account: address,
+        address: marketAddress,
+        abi: MARKET_ABI,
+        functionName: "buy",
+        args: [BigInt(tier.id), address],
+        ...(legacyMeta ?? {}),
+      });
+      return gl * gprice;
+    } catch {
+      return null;
+    }
+  }, [connected, address, publicClient, marketAddress, tier.id, gasPriceWei, isLegacyChain, legacyTx]);
+
+  const hasEnoughFor = (needWei?: bigint | null, padBps = 1500 /* 15% buffer */) => {
+    if (needWei == null) return true;
+    const padded = (needWei * BigInt(10000 + padBps)) / 10000n;
+    return nativeBal >= padded;
+  };
+
+  const friendlyGasLackMsg = (needWei: bigint) => {
+    const have = format5(nativeBal);
+    const need = format5(needWei);
+    return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${need} ${feeSymbol}. Top up a little ${feeSymbol} and try again.`;
+  };
+
+  /** Watch native balance */
+  React.useEffect(() => {
+    let stop = false;
+    (async () => {
+      if (!connected || !address || !publicClient) {
+        if (!stop) setNativeBal(0n);
+        return;
+      }
+      try {
+        const bal = await publicClient.getBalance({ address });
+        if (!stop) setNativeBal(bal);
+      } catch {
+        if (!stop) setNativeBal(0n);
+      }
+    })();
+    return () => { stop = true; };
+  }, [connected, address, publicClient]);
+
+  /** Live estimate fees when relevant inputs change */
+  React.useEffect(() => {
+    let stop = false;
+    (async () => {
+      if (!connected || !address || !publicClient) {
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+        return;
+      }
+      try {
+        const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
+        if (!stop) { setFeeApprove(fa); setFeeBuy(fb); }
+      } catch {
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+      }
+    })();
+    // re-estimate on price/allowance/chain changes too
+  }, [connected, address, publicClient, estimateApproveFee, estimateBuyFee, allowance, price, chain?.id]);
 
   /** Metadata */
   React.useEffect(() => {
@@ -469,6 +605,7 @@ export default function TierCard({
       setOwned(false); setIsWl(false); setTokenBal(0n);
       setCelebrate(false); setTxStage("hidden"); setErr(null);
       setShowImportHelp(false); setAllowance(0n);
+      setFeeApprove(null); setFeeBuy(null); setNativeBal(0n);
     }
   }, [status]);
 
@@ -505,6 +642,18 @@ export default function TierCard({
     return () => window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
   }, [owned]);
 
+  /* -------- approve/buy with gas pre-checks + friendly errors -------- */
+  const rewriteGasError = (raw?: string | null) => {
+    if (!raw) return null;
+    const s = String(raw);
+    const match = /exceeds the balance of the account|insufficient funds for gas/i.test(s);
+    if (match) {
+      const need = feeBuy ?? feeApprove ?? 0n;
+      return friendlyGasLackMsg(need);
+    }
+    return null;
+  };
+
   /** Approve (exact), with legacy gas + explicit gas via estimateContractGas */
   const doApprove = React.useCallback(async () => {
     setErr(null);
@@ -514,6 +663,15 @@ export default function TierCard({
     }
     if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
+
+    // Pre-flight gas check
+    try {
+      const est = (await estimateApproveFee()) ?? 0n;
+      if (!hasEnoughFor(est)) {
+        setErr(friendlyGasLackMsg(est));
+        return;
+      }
+    } catch {}
 
     setBusy(true);
     setTxStage("waiting");
@@ -530,7 +688,6 @@ export default function TierCard({
       const legacyMeta = legacy ? await legacyTx() : undefined;
 
       if (a > 0n && a < required) {
-        // reset to 0 first
         const gas0 = await publicClient.estimateContractGas({
           account: address,
           address: payTokenAddress,
@@ -581,12 +738,13 @@ export default function TierCard({
       setAllowance(aNew);
       setTxStage("hidden");
     } catch (e: any) {
-      setErr(e?.shortMessage || e?.details || e?.message || "Approve failed.");
+      const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
+      setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
       setTxStage("hidden");
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, isLegacyChain, legacyTx]);
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, isLegacyChain, legacyTx, estimateApproveFee]);
 
   /** Buy (legacy gas + explicit gas via estimateContractGas + watchdog) */
   const doBuy = React.useCallback(async () => {
@@ -600,6 +758,15 @@ export default function TierCard({
     if (owned) return;
     if (isZeroAddress(marketAddress)) { setErr("Market address is not set."); return; }
     if (isZeroAddress(passAddress)) { setErr("Pass address is not set."); return; }
+
+    // Pre-flight gas check for BUY
+    try {
+      const est = (await estimateBuyFee()) ?? 0n;
+      if (!hasEnoughFor(est)) {
+        setErr(friendlyGasLackMsg(est));
+        return;
+      }
+    } catch {}
 
     setBusy(true);
     setTxStage("waiting");
@@ -683,13 +850,14 @@ export default function TierCard({
         setTxStage("hidden");
       }
     } catch (e: any) {
-      const msg: string = e?.message || e?.shortMessage || e?.details || "Transaction failed.";
-      setErr(msg);
+      const raw = e?.message || e?.shortMessage || e?.details;
+      const nice = rewriteGasError(raw);
+      setErr(nice || raw || "Transaction failed.");
       setTxStage("hidden");
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, isLegacyChain, legacyTx]);
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, isLegacyChain, legacyTx, estimateBuyFee]);
 
   // Labels
   const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
@@ -710,6 +878,10 @@ export default function TierCard({
   }, [passAddress]);
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
+
+  const lowGasForApprove = connected && feeApprove != null && !hasEnoughFor(feeApprove);
+  const lowGasForBuy = connected && feeBuy != null && !hasEnoughFor(feeBuy);
+  const showGasChip = (lowGasForApprove && allowance < price) || lowGasForBuy;
 
   return (
     <motion.div
@@ -837,22 +1009,22 @@ export default function TierCard({
                 </div>
 
                 {connected && isWl && (
-                  <span
-                    className={`text-[11px] md:text-xs ${
-                      pubPrice > price
-                        ? "line-through decoration-red-400/70 decoration-2 text-white/60"
-                        : "text-white/60"
-                    }`}
-                    title={`Public price: ${pubPriceLabel}`}
-                  >
-                    Public: {pubPriceLabel}
-                  </span>
-                )}
+                  <>
+                    <span
+                      className={`text-[11px] md:text-xs ${
+                        pubPrice > price
+                          ? "line-through decoration-red-400/70 decoration-2 text-white/60"
+                          : "text-white/60"
+                      }`}
+                      title={`Public price: ${pubPriceLabel}`}
+                    >
+                      Public: {pubPriceLabel}
+                    </span>
 
-                {connected && isWl && (
-                  <span className="text-[11px] md:text-xs text-indigo-200/90" title={`Whitelist price: ${wlPriceLabel}`}>
-                    WL: {wlPriceLabel}
-                  </span>
+                    <span className="text-[11px] md:text-xs text-indigo-200/90" title={`Whitelist price: ${wlPriceLabel}`}>
+                      WL: {wlPriceLabel}
+                    </span>
+                  </>
                 )}
 
                 {connected && isWl && pubPrice > price && (
@@ -878,6 +1050,14 @@ export default function TierCard({
                 </div>
               )}
 
+              {/* NEW: show native gas warning chip if low */}
+              {connected && showGasChip && (
+                <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/20">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Low {feeSymbol} for network fees. You have ~{format5(nativeBal)} {feeSymbol}.
+                </div>
+              )}
+
               {/* Split Approve → Buy for mobile reliability */}
               {needsToken && allowance < price ? (
                 <div className="mt-4 grid grid-cols-2 gap-2">
@@ -885,6 +1065,11 @@ export default function TierCard({
                     onClick={doApprove}
                     disabled={busy}
                     className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
+                    title={
+                      lowGasForApprove && feeApprove
+                        ? `Need ~${format5(feeApprove)} ${feeSymbol} for gas`
+                        : undefined
+                    }
                   >
                     {busy ? (
                       <span className="inline-flex items-center gap-2">
@@ -914,6 +1099,11 @@ export default function TierCard({
                       ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
                       : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                   }`}
+                  title={
+                    lowGasForBuy && feeBuy
+                      ? `Need ~${format5(feeBuy)} ${feeSymbol} for gas`
+                      : undefined
+                  }
                 >
                   {!owned && (
                     <span
