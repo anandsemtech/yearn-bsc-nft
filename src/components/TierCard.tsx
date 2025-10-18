@@ -128,7 +128,7 @@ const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 /** Format bigint token to exactly 3 decimals */
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
-  const [i, d = ""] = str.split("."); // ← fixed typo
+  const [i, d = ""] = str.split("."); // ← fixed stray quote
   const dec = (d + "000").slice(0, 3);
   return `${i}.${dec}`;
 };
@@ -530,7 +530,7 @@ export default function TierCard({
       const legacyMeta = legacy ? await legacyTx() : undefined;
 
       if (a > 0n && a < required) {
-        // reset to 0
+        // reset to 0 first
         const gas0 = await publicClient.estimateContractGas({
           account: address,
           address: payTokenAddress,
@@ -610,6 +610,7 @@ export default function TierCard({
         catch { setBusy(false); setTxStage("hidden"); setErr("Please switch to the correct network."); return; }
       }
 
+      // Fresh price and balance checks
       const currentPrice = (await publicClient.readContract({
         address: marketAddress, abi: MARKET_ABI,
         functionName: address ? "priceOf" : "pricePublic",
