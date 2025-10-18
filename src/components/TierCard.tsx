@@ -698,7 +698,7 @@ export default function TierCard({
                 )}
                 {connected && isWl && priceIsFree && (
                   <span className="text-[11px] md:text-xs inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-violet-400/10 text-violet-200 ring-1 ring-violet-300/20">
-                    Whitelist free mint 🎉
+                    Whitelist free NFT 🎉
                   </span>
                 )}
               </div>
@@ -744,7 +744,7 @@ export default function TierCard({
                     </>
                   ) : priceIsFree ? (
                     <>
-                      <SparkIcon className="w-4 h-4" /> Claim Free Mint
+                      <SparkIcon className="w-4 h-4" /> Claim Free NFT
                     </>
                   ) : !hasFunds && needsToken ? (
                     <>
