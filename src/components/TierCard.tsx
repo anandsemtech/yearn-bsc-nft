@@ -18,7 +18,7 @@ import {
   Copy as CopyIcon,
   ChevronDown,
 } from "lucide-react";
-import type { Address } from "viem";
+import type { Address, EstimateContractGasParameters } from "viem";
 import { formatUnits, toHex, getAddress } from "viem";
 import {
   useAccount,
@@ -341,7 +341,7 @@ export default function TierCard({
 
   const [showImportHelp, setShowImportHelp] = React.useState(false);
 
-  /* Native gas fee + balance tracking (display only) */
+  /* NEW: native gas fee + balance tracking */
   const [nativeBal, setNativeBal] = React.useState<bigint>(0n);
   const [feeApprove, setFeeApprove] = React.useState<bigint | null>(null);
   const [feeBuy, setFeeBuy] = React.useState<bigint | null>(null);
@@ -351,59 +351,45 @@ export default function TierCard({
   const needsToken = !priceIsFree;
   const hasFunds = priceIsFree || tokenBal >= price;
 
-  /** Legacy chain detection & gas helpers */
-  const isLegacyChain = React.useCallback(async () => {
+  /** ------------------ Gas helpers (EIP-1559 aware) ------------------ */
+
+  const getPerGasFee = React.useCallback(async (): Promise<bigint> => {
     try {
       const latest = await publicClient!.getBlock({ blockTag: "latest" });
-      return !latest.baseFeePerGas;
-    } catch {
-      return true;
-    }
-  }, [publicClient]);
-
-  const gasPriceWei = React.useCallback(async () => {
-    try {
-      const v = await publicClient!.getGasPrice();
-      return v > 0n ? v : 0n;
+      if (latest.baseFeePerGas) {
+        try {
+          const fees = await publicClient!.estimateFeesPerGas();
+          return fees.maxFeePerGas ?? fees.gasPrice ?? 0n;
+        } catch {
+          const priority = 2_000_000_000n;
+          return latest.baseFeePerGas * 2n + priority;
+        }
+      }
+      return await publicClient!.getGasPrice();
     } catch {
       return 0n;
     }
   }, [publicClient]);
 
-  const legacyTx = React.useCallback(async () => {
-    const gasPrice = await gasPriceWei();
-    return { type: "legacy" as const, gasPrice };
-  }, [gasPriceWei]);
+  const estimateTxFee = React.useCallback(
+    async (opts: EstimateContractGasParameters) => {
+      try {
+        const perGas = await getPerGasFee();
+        const gl = await publicClient!.estimateContractGas(opts as any);
+        const total = perGas > 0n && gl > 0n ? gl * perGas : 0n;
+        return total > 0n ? total : null;
+      } catch {
+        return null;
+      }
+    },
+    [publicClient, getPerGasFee]
+  );
 
-  /** Ensure we are on the tx target chain (publicClient’s chain) */
-  const ensureTargetChain = React.useCallback(async () => {
-    const targetChainId = publicClient?.chain?.id ?? chain?.id ?? currentChainId;
-    if (!targetChainId) return;
-    if (chain?.id !== targetChainId && switchChainAsync) {
-      await switchChainAsync({ chainId: targetChainId });
-    }
-  }, [publicClient?.chain?.id, chain?.id, currentChainId, switchChainAsync]);
-
-  /** Fresh native balance (don’t rely on possibly stale state) */
-  const freshBalance = React.useCallback(async (addr: Address) => {
-    try { return await publicClient!.getBalance({ address: addr }); }
-    catch { return 0n; }
-  }, [publicClient]);
-
-  /* ---------- helpers to estimate native fee (gasLimit * gasPrice) ---------- */
-  /** Approve bundle: reset-to-0 (if needed) + set-to-required */
   const estimateApproveFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
       if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress)) return null;
-
       const need = price;
       let sum = 0n;
-
-      const gprice = await gasPriceWei();
-      if (gprice === 0n) return null;
-
-      const legacy = await isLegacyChain();
-      const legacyMeta = legacy ? await legacyTx() : undefined;
 
       const a = (await publicClient.readContract({
         address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
@@ -411,100 +397,57 @@ export default function TierCard({
       })) as bigint;
 
       if (a > 0n && a < need) {
-        const gl0 = await publicClient.estimateContractGas({
+        const f0 = await estimateTxFee({
           account: address,
           address: payTokenAddress,
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, 0n],
-          ...(legacyMeta ?? {}),
-        });
-        if (gl0 > 0n) sum += gl0 * gprice;
+        } as unknown as EstimateContractGasParameters);
+        if (f0) sum += f0;
       }
       if (a < need) {
-        const gl = await publicClient.estimateContractGas({
+        const f1 = await estimateTxFee({
           account: address,
           address: payTokenAddress,
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, need],
-          ...(legacyMeta ?? {}),
-        });
-        if (gl > 0n) sum += gl * gprice;
+        } as unknown as EstimateContractGasParameters);
+        if (f1) sum += f1;
       }
       return sum > 0n ? sum : null;
-    } catch {
-      return null;
-    }
-  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, gasPriceWei, isLegacyChain, legacyTx]);
+    } catch { return null; }
+  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, estimateTxFee]);
 
   const estimateBuyFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
       if (!connected || !address || !publicClient || isZeroAddress(marketAddress)) return null;
-      const gprice = await gasPriceWei();
-      if (gprice === 0n) return null;
-      const legacy = await isLegacyChain();
-      const legacyMeta = legacy ? await legacyTx() : undefined;
-      const gl = await publicClient.estimateContractGas({
+      const f = await estimateTxFee({
         account: address,
         address: marketAddress,
         abi: MARKET_ABI,
         functionName: "buy",
         args: [BigInt(tier.id), address],
-        ...(legacyMeta ?? {}),
-      });
-      return gl > 0n ? gl * gprice : null;
-    } catch {
-      return null;
-    }
-  }, [connected, address, publicClient, marketAddress, tier.id, gasPriceWei, isLegacyChain, legacyTx]);
+      } as unknown as EstimateContractGasParameters);
+      return f;
+    } catch { return null; }
+  }, [connected, address, publicClient, marketAddress, tier.id, estimateTxFee]);
 
-  const hasEnoughFor = (haveWei: bigint, needWei?: bigint | null, padBps = 1500 /* 15% buffer */) => {
-    if (needWei == null || needWei === 0n) return true;
+  const hasEnoughFor = (needWei?: bigint | null, padBps = 800) => {
+    if (!needWei || needWei <= 0n) return true;
     const padded = (needWei * BigInt(10000 + padBps)) / 10000n;
-    return haveWei >= padded;
+    return nativeBal >= padded;
   };
 
-  const friendlyGasLackMsg = (have: bigint, need?: bigint | null) => {
-    const haveStr = format5(have);
-    const needStr = format5(need ?? 0n);
-    return `Not enough ${feeSymbol} for network fees. You have ~${haveStr} ${feeSymbol}, need about ~${needStr} ${feeSymbol}. Top up a little ${feeSymbol} and try again.`;
+  const gasWarnLine = (needWei?: bigint | null) => {
+    const have = format5(nativeBal);
+    if (!needWei || needWei <= 0n) {
+      return `Looks like you might need some ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}. Add a little more and try again.`;
+    }
+    const need = format5(needWei);
+    return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${need} ${feeSymbol}. Please top up and try again.`;
   };
-
-  /** Watch native balance for display only */
-  React.useEffect(() => {
-    let stop = false;
-    (async () => {
-      if (!connected || !address || !publicClient) {
-        if (!stop) setNativeBal(0n);
-        return;
-      }
-      try {
-        const bal = await publicClient.getBalance({ address });
-        if (!stop) setNativeBal(bal);
-      } catch {
-        if (!stop) setNativeBal(0n);
-      }
-    })();
-    return () => { stop = true; };
-  }, [connected, address, publicClient]);
-
-  /** Live estimate fees for UI hints (not used for blocking) */
-  React.useEffect(() => {
-    let stop = false;
-    (async () => {
-      if (!connected || !address || !publicClient) {
-        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
-        return;
-      }
-      try {
-        const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
-        if (!stop) { setFeeApprove(fa); setFeeBuy(fb); }
-      } catch {
-        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
-      }
-    })();
-  }, [connected, address, publicClient, estimateApproveFee, estimateBuyFee, allowance, price, chain?.id]);
 
   /** Metadata */
   React.useEffect(() => {
@@ -646,6 +589,41 @@ export default function TierCard({
     return () => { stop = true; };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
 
+  /** Native balance watcher */
+  React.useEffect(() => {
+    let stop = false;
+    (async () => {
+      if (!connected || !address || !publicClient) {
+        if (!stop) setNativeBal(0n);
+        return;
+      }
+      try {
+        const bal = await publicClient.getBalance({ address });
+        if (!stop) setNativeBal(bal);
+      } catch {
+        if (!stop) setNativeBal(0n);
+      }
+    })();
+    return () => { stop = true; };
+  }, [connected, address, publicClient]);
+
+  /** Live fee estimates */
+  React.useEffect(() => {
+    let stop = false;
+    (async () => {
+      if (!connected || !address || !publicClient) {
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+        return;
+      }
+      try {
+        const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
+        if (!stop) { setFeeApprove(fa); setFeeBuy(fb); }
+      } catch {
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+      }
+    })();
+  }, [connected, address, publicClient, estimateApproveFee, estimateBuyFee, allowance, price, chain?.id]);
+
   /** Filter */
   React.useEffect(() => {
     const apply = (mode: NftFilter) => setVisible(mode === "all" ? true : owned);
@@ -660,22 +638,18 @@ export default function TierCard({
   }, [owned]);
 
   /* -------- approve/buy with gas pre-checks + friendly errors -------- */
-  const rewriteGasError = (raw?: string | null, have?: bigint) => {
+  const rewriteGasError = (raw?: string | null) => {
     if (!raw) return null;
     const s = String(raw);
-    const match = /exceeds the balance of the account|insufficient funds for gas/i.test(s);
+    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(s);
     if (match) {
       const need = feeBuy ?? feeApprove ?? null;
-      if (need && need > 0n && connected && address) {
-        return friendlyGasLackMsg(have ?? nativeBal, need);
-      }
-      // If estimator unknown, show a generic but still helpful version
-      return `Not enough ${feeSymbol} to cover network fees. Please add a bit more ${feeSymbol} and try again.`;
+      return gasWarnLine(need);
     }
     return null;
   };
 
-  /** Approve (exact), switch-first + fresh-balance guard + legacy gas + explicit gas */
+  /** Approve (exact), estimate + preflight */
   const doApprove = React.useCallback(async () => {
     setErr(null);
     if (!connected || !address) {
@@ -685,16 +659,14 @@ export default function TierCard({
     if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
 
-    // Ensure correct chain before estimating/guarding
-    try { await ensureTargetChain(); } catch { setErr("Please switch to the correct network."); return; }
-
-    // Fresh balance & estimate on active chain
-    let have = await freshBalance(address as Address);
-    const est = await estimateApproveFee(); // may be null/unknown
-    if (est && est > 0n && !hasEnoughFor(have, est)) {
-      setErr(friendlyGasLackMsg(have, est));
-      return;
-    }
+    // Pre-flight gas check (do not block if estimate is null/0)
+    try {
+      const est = (await estimateApproveFee()) ?? 0n;
+      if (est > 0n && !hasEnoughFor(est)) {
+        setErr(gasWarnLine(est));
+        return;
+      }
+    } catch {}
 
     setBusy(true);
     setTxStage("waiting");
@@ -707,9 +679,6 @@ export default function TierCard({
         args: [address, marketAddress],
       })) as bigint;
 
-      const legacy = await isLegacyChain();
-      const legacyMeta = legacy ? await legacyTx() : undefined;
-
       if (a > 0n && a < required) {
         const gas0 = await publicClient.estimateContractGas({
           account: address,
@@ -717,7 +686,6 @@ export default function TierCard({
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, 0n],
-          ...(legacyMeta ?? {}),
         });
         const { request } = await publicClient.simulateContract({
           account: address,
@@ -725,7 +693,6 @@ export default function TierCard({
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, 0n],
-          ...(legacyMeta ?? {}),
         });
         const h0 = await walletClient.writeContract({ ...request, gas: gas0 });
         await publicClient.waitForTransactionReceipt({ hash: h0 });
@@ -739,7 +706,6 @@ export default function TierCard({
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, required],
-          ...(legacyMeta ?? {}),
         });
         const { request } = await publicClient.simulateContract({
           account: address,
@@ -747,7 +713,6 @@ export default function TierCard({
           abi: ERC20_ABI,
           functionName: "approve",
           args: [marketAddress, required],
-          ...(legacyMeta ?? {}),
         });
         const hash = await walletClient.writeContract({ ...request, gas });
         await publicClient.waitForTransactionReceipt({ hash });
@@ -761,17 +726,15 @@ export default function TierCard({
       setAllowance(aNew);
       setTxStage("hidden");
     } catch (e: any) {
-      // Re-evaluate have so the error message shows accurate numbers
-      const have = await freshBalance(address as Address);
-      const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message, have);
+      const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
       setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
       setTxStage("hidden");
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, isLegacyChain, legacyTx, estimateApproveFee, ensureTargetChain, freshBalance]);
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee]);
 
-  /** Buy (switch-first + fresh-balance guard + legacy gas + explicit gas + watchdog) */
+  /** Buy with preflight + chain switch (estimate after switch) */
   const doBuy = React.useCallback(async () => {
     setErr(null);
 
@@ -784,34 +747,43 @@ export default function TierCard({
     if (isZeroAddress(marketAddress)) { setErr("Market address is not set."); return; }
     if (isZeroAddress(passAddress)) { setErr("Pass address is not set."); return; }
 
-    // Ensure correct chain before estimating/guarding
-    try { await ensureTargetChain(); } catch { setErr("Please switch to the correct network."); return; }
-
-    // Fresh price, balance & estimate on active chain
-    const currentPrice = (await publicClient.readContract({
-      address: marketAddress, abi: MARKET_ABI,
-      functionName: address ? "priceOf" : "pricePublic",
-      args: address ? [BigInt(tier.id), address] : [BigInt(tier.id)],
-    })) as bigint;
-    setPrice(currentPrice);
-    if (needsToken && tokenBal < currentPrice) {
-      setTxStage("hidden");
-      setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
-      return;
-    }
-
-    const have = await freshBalance(address as Address);
-    const estBuy = await estimateBuyFee(); // may be null/unknown
-    if (estBuy && estBuy > 0n && !hasEnoughFor(have, estBuy)) {
-      setErr(friendlyGasLackMsg(have, estBuy));
-      return;
-    }
-
     setBusy(true);
     setTxStage("waiting");
     try {
-      const legacy = await isLegacyChain();
-      const legacyMeta = legacy ? await legacyTx() : undefined;
+      // Ensure wallet is on the same chain as publicClient
+      const targetChainId = publicClient.chain?.id ?? chain?.id ?? currentChainId;
+      if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
+        try { await switchChainAsync({ chainId: targetChainId }); }
+        catch {
+          setBusy(false); setTxStage("hidden");
+          setErr("Please switch to the correct network.");
+          return;
+        }
+      }
+
+      // Re-read price and balances right before sending
+      const currentPrice = (await publicClient.readContract({
+        address: marketAddress, abi: MARKET_ABI,
+        functionName: address ? "priceOf" : "pricePublic",
+        args: address ? [BigInt(tier.id), address] : [BigInt(tier.id)],
+      })) as bigint;
+      setPrice(currentPrice);
+
+      if (needsToken && tokenBal < currentPrice) {
+        setBusy(false); setTxStage("hidden");
+        setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
+        return;
+      }
+
+      // Re-estimate BUY gas on the now-correct chain; do not block if unknown/zero
+      try {
+        const est = (await estimateBuyFee()) ?? 0n;
+        if (est > 0n && !hasEnoughFor(est)) {
+          setBusy(false); setTxStage("hidden");
+          setErr(gasWarnLine(est));
+          return;
+        }
+      } catch {}
 
       const gas = await publicClient.estimateContractGas({
         account: address,
@@ -819,7 +791,6 @@ export default function TierCard({
         abi: MARKET_ABI,
         functionName: "buy",
         args: [BigInt(tier.id), address],
-        ...(legacyMeta ?? {}),
       });
       const { request } = await publicClient.simulateContract({
         account: address,
@@ -827,7 +798,6 @@ export default function TierCard({
         abi: MARKET_ABI,
         functionName: "buy",
         args: [BigInt(tier.id), address],
-        ...(legacyMeta ?? {}),
       });
 
       const send = walletClient.writeContract({ ...request, gas });
@@ -870,15 +840,14 @@ export default function TierCard({
         setTxStage("hidden");
       }
     } catch (e: any) {
-      const have = await freshBalance(address as Address);
       const raw = e?.message || e?.shortMessage || e?.details;
-      const nice = rewriteGasError(raw, have);
+      const nice = rewriteGasError(raw);
       setErr(nice || raw || "Transaction failed.");
       setTxStage("hidden");
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, tier.id, needsToken, tokenBal, payTokenSymbol, isLegacyChain, legacyTx, estimateBuyFee, ensureTargetChain, freshBalance]);
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee]);
 
   // Labels
   const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
@@ -900,8 +869,8 @@ export default function TierCard({
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
-  const lowGasForApprove = connected && feeApprove != null && nativeBal > 0n && !hasEnoughFor(nativeBal, feeApprove);
-  const lowGasForBuy = connected && feeBuy != null && nativeBal > 0n && !hasEnoughFor(nativeBal, feeBuy);
+  const lowGasForApprove = connected && feeApprove != null && !hasEnoughFor(feeApprove);
+  const lowGasForBuy = connected && feeBuy != null && !hasEnoughFor(feeBuy);
   const showGasChip = (lowGasForApprove && allowance < price) || lowGasForBuy;
 
   return (
@@ -1071,7 +1040,6 @@ export default function TierCard({
                 </div>
               )}
 
-              {/* Gas warning chip (UI hint only) */}
               {connected && showGasChip && (
                 <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/20">
                   <AlertCircle className="w-3.5 h-3.5" />
@@ -1079,7 +1047,6 @@ export default function TierCard({
                 </div>
               )}
 
-              {/* Split Approve → Buy for mobile reliability */}
               {needsToken && allowance < price ? (
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <button
@@ -1087,8 +1054,8 @@ export default function TierCard({
                     disabled={busy}
                     className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
                     title={
-                      feeApprove && feeApprove > 0n
-                        ? `Estimated gas ~${format5(feeApprove)} ${feeSymbol}`
+                      connected && feeApprove != null && !hasEnoughFor(feeApprove)
+                        ? `Need ~${format5(feeApprove)} ${feeSymbol} for gas`
                         : undefined
                     }
                   >
@@ -1121,8 +1088,8 @@ export default function TierCard({
                       : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                   }`}
                   title={
-                    feeBuy && feeBuy > 0n
-                      ? `Estimated gas ~${format5(feeBuy)} ${feeSymbol}`
+                    connected && feeBuy != null && !hasEnoughFor(feeBuy)
+                      ? `Need ~${format5(feeBuy)} ${feeSymbol} for gas`
                       : undefined
                   }
                 >
@@ -1195,7 +1162,6 @@ export default function TierCard({
                 )}
               </AnimatePresence>
 
-              {/* MetaMask Mobile Import Helper */}
               {isMobile() && (
                 <div className="mt-4">
                   <button
@@ -1215,7 +1181,6 @@ export default function TierCard({
                     />
                   </button>
 
-                  {/* CSS accordion (no layout jumps) */}
                   <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
                     <div className="px-3 pt-3 pb-2 text-[12px] text-white/75 space-y-2">
                       <p>
@@ -1229,8 +1194,8 @@ export default function TierCard({
                       </ol>
                       <div className="mt-2 space-y-2">
                         <CopyField label="Contract" value={checksumPass} />
-                        <CopyField label="Token ID (decimal)" value={tokenIdDec} mono />
-                        <CopyField label="Token ID (hex)" value={tokenIdHex} mono />
+                        <CopyField label="Token ID (decimal)" value={String(tier.id)} mono />
+                        <CopyField label="Token ID (hex)" value={`0x${idHex64(tier.id)}`} mono />
                       </div>
                       {isMetaMaskUA() && isMobile() && (
                         <p className="pt-1 opacity-80">
@@ -1247,13 +1212,11 @@ export default function TierCard({
         </motion.div>
       </div>
 
-      {/* Local styles */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes spin-rev { to { transform: rotate(-360deg); } }
         .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
 
-        /* Accordion (no layout thrash) */
         .acc { overflow: hidden; transition: max-height 0.22s ease, opacity 0.22s ease; will-change: max-height, opacity; }
         .acc-closed { max-height: 0; opacity: 0; }
         .acc-open   { max-height: 360px; opacity: 1; }
