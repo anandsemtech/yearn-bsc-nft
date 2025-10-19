@@ -132,12 +132,13 @@ const format3 = (value: bigint, decimals: number) => {
   const dec = (d + "000").slice(0, 3);
   return `${i}.${dec}`;
 };
-/** Format native balance/fee to 5 dp (for gas) */
+/** Format native balance/fee to 5 dp (for gas) — rounds and floors tiny values */
 const format5 = (value: bigint, decimals = 18) => {
-  const str = formatUnits(value, decimals);
-  const [i, d = ""] = str.split(".");
-  const dec = (d + "00000").slice(0, 5);
-  return `${i}.${dec}`;
+  const s = formatUnits(value, decimals);
+  const n = Number(s);
+  if (!isFinite(n) || n === 0) return "0.00000";
+  if (Math.abs(n) < 0.00001) return "<0.00001";
+  return n.toFixed(5);
 };
 
 /** IPFS helper */
