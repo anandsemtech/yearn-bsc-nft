@@ -352,6 +352,8 @@ export default function TierCard({
   const hasFunds = priceIsFree || tokenBal >= price;
 
   /** ------------------ Gas helpers (EIP-1559 aware) ------------------ */
+  const perGasRef = React.useRef<bigint>(0n);
+  const lastActionRef = React.useRef<"approve" | "buy" | null>(null);
 
   const getPerGasFee = React.useCallback(async (): Promise<bigint> => {
     try {
@@ -359,17 +361,36 @@ export default function TierCard({
       if (latest.baseFeePerGas) {
         try {
           const fees = await publicClient!.estimateFeesPerGas();
-          return fees.maxFeePerGas ?? fees.gasPrice ?? 0n;
+          const per = fees.maxFeePerGas ?? fees.gasPrice ?? 0n;
+          if (per > 0n) perGasRef.current = per;
+          return per;
         } catch {
-          const priority = 2_000_000_000n;
-          return latest.baseFeePerGas * 2n + priority;
+          const priority = 2_000_000_000n; // 2 gwei safety
+          const per = latest.baseFeePerGas * 2n + priority;
+          perGasRef.current = per;
+          return per;
         }
       }
-      return await publicClient!.getGasPrice();
+      const gp = await publicClient!.getGasPrice();
+      if (gp > 0n) perGasRef.current = gp;
+      return gp;
     } catch {
-      return 0n;
+      return perGasRef.current || 2_000_000_000n; // fallback 2 gwei
     }
   }, [publicClient]);
+
+  // Synchronous rough fallbacks (used when estimate is null/zero or inside catch)
+  const roughApproveFee = React.useCallback((): bigint => {
+    const per = perGasRef.current || 2_000_000_000n; // 2 gwei
+    // two txs possible (reset + set): ~160k; single approve ~70k
+    const gl = 160_000n;
+    return per * gl;
+  }, []);
+  const roughBuyFee = React.useCallback((): bigint => {
+    const per = perGasRef.current || 2_000_000_000n;
+    const gl = 220_000n; // generous for buy()
+    return per * gl;
+  }, []);
 
   const estimateTxFee = React.useCallback(
     async (opts: EstimateContractGasParameters) => {
@@ -404,7 +425,7 @@ export default function TierCard({
           functionName: "approve",
           args: [marketAddress, 0n],
         } as unknown as EstimateContractGasParameters);
-        if (f0) sum += f0;
+        sum += f0 ?? roughApproveFee() / 2n; // half of rough for reset
       }
       if (a < need) {
         const f1 = await estimateTxFee({
@@ -414,11 +435,11 @@ export default function TierCard({
           functionName: "approve",
           args: [marketAddress, need],
         } as unknown as EstimateContractGasParameters);
-        if (f1) sum += f1;
+        sum += f1 ?? roughApproveFee();
       }
-      return sum > 0n ? sum : null;
-    } catch { return null; }
-  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, estimateTxFee]);
+      return sum > 0n ? sum : roughApproveFee();
+    } catch { return roughApproveFee(); }
+  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, estimateTxFee, roughApproveFee]);
 
   const estimateBuyFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
@@ -430,9 +451,9 @@ export default function TierCard({
         functionName: "buy",
         args: [BigInt(tier.id), address],
       } as unknown as EstimateContractGasParameters);
-      return f;
-    } catch { return null; }
-  }, [connected, address, publicClient, marketAddress, tier.id, estimateTxFee]);
+      return f ?? roughBuyFee();
+    } catch { return roughBuyFee(); }
+  }, [connected, address, publicClient, marketAddress, tier.id, estimateTxFee, roughBuyFee]);
 
   const hasEnoughFor = (needWei?: bigint | null, padBps = 800) => {
     if (!needWei || needWei <= 0n) return true;
@@ -494,7 +515,7 @@ export default function TierCard({
       } catch {}
     })();
 
-    return () => { aborted = true; ctrl.abort(); };
+    return () => { ctrl.abort(); aborted = true; };
   }, [tier.id, tier.uri, passAddress, publicClient]);
 
   /** Ownership / price / WL / allowance */
@@ -643,7 +664,11 @@ export default function TierCard({
     const s = String(raw);
     const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(s);
     if (match) {
-      const need = feeBuy ?? feeApprove ?? null;
+      const op = lastActionRef.current;
+      const need =
+        op === "buy"
+          ? (feeBuy ?? roughBuyFee())
+          : (feeApprove ?? roughApproveFee());
       return gasWarnLine(need);
     }
     return null;
@@ -652,6 +677,8 @@ export default function TierCard({
   /** Approve (exact), estimate + preflight */
   const doApprove = React.useCallback(async () => {
     setErr(null);
+    lastActionRef.current = "approve";
+
     if (!connected || !address) {
       try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
       return;
@@ -659,14 +686,17 @@ export default function TierCard({
     if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
 
-    // Pre-flight gas check (do not block if estimate is null/0)
+    // Pre-flight gas check (use rough if estimate missing)
     try {
-      const est = (await estimateApproveFee()) ?? 0n;
+      const est = (await estimateApproveFee()) ?? roughApproveFee();
       if (est > 0n && !hasEnoughFor(est)) {
         setErr(gasWarnLine(est));
         return;
       }
-    } catch {}
+    } catch {
+      const rough = roughApproveFee();
+      if (!hasEnoughFor(rough)) { setErr(gasWarnLine(rough)); return; }
+    }
 
     setBusy(true);
     setTxStage("waiting");
@@ -732,11 +762,12 @@ export default function TierCard({
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee]);
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee]);
 
   /** Buy with preflight + chain switch (estimate after switch) */
   const doBuy = React.useCallback(async () => {
     setErr(null);
+    lastActionRef.current = "buy";
 
     if (!connected || !address) {
       try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
@@ -775,15 +806,22 @@ export default function TierCard({
         return;
       }
 
-      // Re-estimate BUY gas on the now-correct chain; do not block if unknown/zero
+      // Preflight: use estimate; if missing, use rough hint
       try {
-        const est = (await estimateBuyFee()) ?? 0n;
+        const est = (await estimateBuyFee()) ?? roughBuyFee();
         if (est > 0n && !hasEnoughFor(est)) {
           setBusy(false); setTxStage("hidden");
           setErr(gasWarnLine(est));
           return;
         }
-      } catch {}
+      } catch {
+        const rough = roughBuyFee();
+        if (!hasEnoughFor(rough)) {
+          setBusy(false); setTxStage("hidden");
+          setErr(gasWarnLine(rough));
+          return;
+        }
+      }
 
       const gas = await publicClient.estimateContractGas({
         account: address,
@@ -847,7 +885,7 @@ export default function TierCard({
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee]);
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee]);
 
   // Labels
   const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
@@ -869,9 +907,15 @@ export default function TierCard({
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
-  const lowGasForApprove = connected && feeApprove != null && !hasEnoughFor(feeApprove);
-  const lowGasForBuy = connected && feeBuy != null && !hasEnoughFor(feeBuy);
-  const showGasChip = (lowGasForApprove && allowance < price) || lowGasForBuy;
+  const lowApprove =
+    connected &&
+    (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove));
+
+  const lowBuy =
+    connected &&
+    (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy));
+
+  const showGasChip = (lowApprove && allowance < price) || lowBuy;
 
   return (
     <motion.div
@@ -1054,8 +1098,9 @@ export default function TierCard({
                     disabled={busy}
                     className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
                     title={
-                      connected && feeApprove != null && !hasEnoughFor(feeApprove)
-                        ? `Need ~${format5(feeApprove)} ${feeSymbol} for gas`
+                      connected &&
+                      (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove))
+                        ? `Need ~${format5(feeApprove ?? roughApproveFee())} ${feeSymbol} for gas`
                         : undefined
                     }
                   >
@@ -1088,8 +1133,9 @@ export default function TierCard({
                       : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                   }`}
                   title={
-                    connected && feeBuy != null && !hasEnoughFor(feeBuy)
-                      ? `Need ~${format5(feeBuy)} ${feeSymbol} for gas`
+                    connected &&
+                    (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy))
+                      ? `Need ~${format5(feeBuy ?? roughBuyFee())} ${feeSymbol} for gas`
                       : undefined
                   }
                 >
