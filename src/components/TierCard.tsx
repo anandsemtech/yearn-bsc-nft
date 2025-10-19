@@ -83,39 +83,119 @@ const isMobile = () =>
 const isMetaMaskUA = () =>
   typeof window !== "undefined" && (window as any)?.ethereum?.isMetaMask === true;
 
-const CopyField: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => {
+
+// Put below: const isMetaMaskUA = ...
+const shortenMid = (v?: string, left = 10, right = 6) => {
+  if (!v) return "";
+  if (v.length <= left + right + 3) return v;
+  return `${v.slice(0, left)}…${v.slice(-right)}`;
+};
+
+// Low-end device detector: trims effects & heavy animations on weak phones
+const isLowEndDevice = () => {
+  try {
+    const mem = (navigator as any).deviceMemory || 0;
+    const cores = navigator.hardwareConcurrency || 0;
+    return isMobile() && ((mem && mem <= 4) || (cores && cores <= 4));
+  } catch {
+    return false;
+  }
+};
+
+const isLikelyImage = (u?: string) => !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
+const isLikelyVideo = (u?: string) => !!u && /\.(mp4|webm|mov|ogv)$/i.test(u.split("?")[0] ?? "");
+const isGif = (u?: string) =>
+  !!u && /\.gif(\?.*)?$/i.test((u.split("?")[0] ?? ""));
+const isSvg = (u?: string) =>
+  !!u && /\.svg(\?.*)?$/i.test((u.split("?")[0] ?? ""));
+
+
+// Optional lightweight IPFS image optimizer (works with Cloudflare IPFS or any gateway that ignores unknown params)
+const optimizeImageUrl = (url?: string, width = 800) => {
+  if (!url || !isLikelyImage(url) || isGif(url) || isSvg(url)) return url; // ← do not touch GIF/SVG
+  try {
+    const u = new URL(url);
+
+    // Soft hints (ignored by most gateways)
+    if (!u.searchParams.has("width")) u.searchParams.set("width", String(width));
+    if (!u.searchParams.has("format")) u.searchParams.set("format", "auto");
+
+    const host = u.host.toLowerCase();
+    const isPlainIpfs = /(^|\.)ipfs\.io$|(^|\.)dweb\.link$/.test(host);
+    if (isPlainIpfs) {
+      const original = u.toString();
+      // WebP via weserv for non-GIF/SVG only
+      return `https://wsrv.nl/?url=${encodeURIComponent(original)}&w=${width}&output=webp&we&il`;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
+};
+
+
+/** Build responsive src/srcSet for images (ipfs.io supported via proxy). */
+const buildSrcSet = (url?: string) => {
+  // For GIF/SVG: keep original (no srcset), avoids losing animation or vector sharpness
+  if (!url || !isLikelyImage(url) || isGif(url) || isSvg(url)) {
+    return { src: url, srcSet: undefined, sizes: undefined };
+  }
+  const widths = [480, 800, 1200];
+  const entries = widths.map((w) => `${optimizeImageUrl(url, w)} ${w}w`);
+  return {
+    src: optimizeImageUrl(url, 800),
+    srcSet: entries.join(", "),
+    sizes: "(max-width: 640px) 480px, (max-width: 1024px) 800px, 1200px",
+  };
+};
+
+
+
+const CopyField: React.FC<{
+  label: string;
+  value: string;
+  display?: string;     // pretty, shortened version (shown)
+  mono?: boolean;
+  color?: "indigo" | "cyan" | "violet";
+}> = ({ label, value, display, mono, color = "indigo" }) => {
   const [copied, setCopied] = React.useState(false);
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      setTimeout(() => setCopied(false), 900);
     } catch {}
   };
+  const ring =
+    color === "cyan"
+      ? "ring-cyan-400/30 hover:bg-cyan-500/15"
+      : color === "violet"
+      ? "ring-violet-400/30 hover:bg-violet-500/15"
+      : "ring-indigo-400/30 hover:bg-indigo-500/15";
+
   return (
-    <div className="flex items-center gap-2 text-xs text-white/80">
-      <span className="opacity-70">{label}:</span>
+    <div className="flex items-center gap-2 text-xs text-white/85">
+      <span className="opacity-70 shrink-0">{label}:</span>
       <code
-        className={`px-1.5 py-[2px] rounded bg-white/5 ring-1 ring-white/10 ${
+        className={`px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-white/10 ${
           mono ? "font-mono" : ""
-        } max-w-full overflow-x-auto whitespace-nowrap`}
+        } max-w-[60%] sm:max-w-[70%] overflow-hidden text-ellipsis whitespace-nowrap`}
+        title={value}
       >
-        {value}
+        {display ?? value}
       </code>
       <button
         type="button"
         onClick={onCopy}
-        className="inline-flex items-center gap-1 px-1.5 py-1 rounded ring-1 ring-white/10 hover:bg-white/10"
+        className={`inline-flex items-center gap-1 px-1.5 py-1 rounded ${ring} ring-1 transition`}
+        aria-label="Copy to clipboard"
       >
         <CopyIcon className="w-3.5 h-3.5" /> {copied ? "Copied" : "Copy"}
       </button>
     </div>
   );
 };
+
 
 type Props = {
   passAddress: Address;
@@ -139,10 +219,11 @@ const format3 = (value: bigint, decimals: number) => {
 const format5 = (value: bigint, decimals = 18) => {
   const s = formatUnits(value, decimals);
   const n = Number(s);
-  if (!isFinite(n) || n === 0) return "0";
+  if (!isFinite(n) || n === 0) return "0.00000";
   if (Math.abs(n) < 0.00001) return "<0.00001";
   return n.toFixed(5);
 };
+
 
 /** IPFS helper */
 const ipfsToHttp = (uri?: string, gateway = DEFAULT_IPFS_GATEWAY): string | undefined => {
@@ -347,6 +428,9 @@ export default function TierCard({
   React.useEffect(() => {
     ensureOrbitronLink();
   }, []);
+
+  const lowEnd = React.useMemo(() => isLowEndDevice(), []);
+
 
   const { isConnected, address, chain, status } = useAccount();
   const publicClient = usePublicClient();
@@ -1107,9 +1191,8 @@ export default function TierCard({
   const yPct = useTransform(y, (v: number) => v * 100);
   const glare = useMotionTemplate`radial-gradient(420px circle at ${xPct}% ${yPct}%, rgba(255,255,255,.12), transparent 45%)`;
 
-  if (!visible) return null;
-
   const checksumPass = React.useMemo(() => {
+
     try {
       return getAddress(passAddress);
     } catch {
@@ -1129,8 +1212,11 @@ export default function TierCard({
     ((allowance < price && haveFeeApprove && !hasEnoughFor(feeApprove)) ||
       (haveFeeBuy && !hasEnoughFor(feeBuy)));
 
-  return (
+  const optimizedSet = React.useMemo(() => buildSrcSet(mediaUrl), [mediaUrl]);
+
+  return visible ? (
     <motion.div
+      layout="position"   // ← add this
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
@@ -1140,8 +1226,9 @@ export default function TierCard({
         <motion.div layout style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
           <HoloCard>
             <CursorGlow x={x} y={y} />
-            <GradientMesh />
-            <Scanlines />
+            {!lowEnd && <GradientMesh />}
+            {!lowEnd && <Scanlines />}
+
 
             {/* MEDIA */}
             <motion.div
@@ -1165,7 +1252,9 @@ export default function TierCard({
               )}
 
               <div className="pointer-events-none absolute inset-0 z-10 [content-visibility:auto] [contain-intrinsic-size:320px_240px]">
-                <MetaverseScene />
+                {!lowEnd && <MetaverseScene />}
+
+
                 <div className="absolute inset-0 grid place-items-center">
                   {mediaUrl ? (
                     isVideo ? (
@@ -1176,23 +1265,32 @@ export default function TierCard({
                         loop
                         muted
                         playsInline
+                        preload="metadata"
+                        disablePictureInPicture
+                        controls={false}
                         className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95] rounded-lg"
                         initial={{ scale: 0.98, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
+
                     ) : (
                       <motion.img
-                        key={mediaUrl}
-                        src={mediaUrl}
+                        key={optimizedSet.src || mediaUrl}
+                        src={optimizedSet.src}
+                        srcSet={optimizedSet.srcSet}
+                        sizes={optimizedSet.sizes}
                         alt={name}
                         loading="lazy"
+                        decoding="async"
+                        {...({ fetchpriority: "low" } as any)}
                         draggable={false}
                         className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95]"
                         initial={{ scale: 0.98, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
+
                     )
                   ) : (
                     <motion.div
@@ -1456,13 +1554,11 @@ export default function TierCard({
                     />
                   </button>
 
-                  <motion.div
-                    layout
-                    initial={false}
-                    animate={{ height: showImportHelp ? "auto" : 0, opacity: showImportHelp ? 1 : 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
+                 <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
+
+
+                      <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
+
                       <p className="leading-relaxed">
                         MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. Import it manually:
                       </p>
@@ -1477,56 +1573,35 @@ export default function TierCard({
                       </ol>
 
                       <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="opacity-70">Contract:</span>
-                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
-                            {checksumPass}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(checksumPass)}
-                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
-                          >
-                            <CopyIcon className="w-3.5 h-3.5" /> Copy
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="opacity-70">Token ID (decimal):</span>
-                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
-                            {tokenIdDec}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(tokenIdDec)}
-                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
-                          >
-                            <CopyIcon className="w-3.5 h-3.5" /> Copy
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="opacity-70">Token ID (hex):</span>
-                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
-                            {tokenIdHex}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(tokenIdHex)}
-                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
-                          >
-                            <CopyIcon className="w-3.5 h-3.5" /> Copy
-                          </button>
-                        </div>
-
+                        <CopyField
+                          label="Contract"
+                          value={checksumPass}
+                          display={shortenMid(checksumPass, 12, 8)}
+                          mono
+                          color="cyan"
+                        />
+                        <CopyField
+                          label="Token ID (decimal)"
+                          value={tokenIdDec}
+                          mono
+                          color="indigo"
+                        />
+                        <CopyField
+                          label="Token ID (hex)"
+                          value={tokenIdHex}
+                          display={shortenMid(tokenIdHex, 14, 12)}
+                          mono
+                          color="violet"
+                        />
                         {isMetaMaskUA() && isMobile() && (
                           <p className="pt-1 opacity-75">
                             Tip: Pull down to refresh if it doesn’t appear immediately.
                           </p>
                         )}
                       </div>
+
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1538,9 +1613,13 @@ export default function TierCard({
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes spin-rev { to { transform: rotate(-360deg); } }
         .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
+        .acc { overflow:hidden; transition:max-height .24s ease, opacity .24s ease; will-change:max-height, opacity; }
+        .acc-closed { max-height:0; opacity:0; }
+        .acc-open { max-height:420px; opacity:1; } /* large enough for the help content */
+
       `}</style>
     </motion.div>
-  );
+  ) : null;
 }
 
 /* Corner ribbon */
