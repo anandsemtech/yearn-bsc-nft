@@ -52,7 +52,10 @@ const ensureOrbitronLink = (() => {
   return () => {
     if (done || typeof document === "undefined") return;
     const existing = document.querySelector('link[data-font="orbitron-audiowide"]');
-    if (existing) { done = true; return; }
+    if (existing) {
+      done = true;
+      return;
+    }
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.setAttribute("data-font", "orbitron-audiowide");
@@ -136,7 +139,7 @@ const format3 = (value: bigint, decimals: number) => {
 const format5 = (value: bigint, decimals = 18) => {
   const s = formatUnits(value, decimals);
   const n = Number(s);
-  if (!isFinite(n) || n === 0) return "0.00000";
+  if (!isFinite(n) || n === 0) return "0";
   if (Math.abs(n) < 0.00001) return "<0.00001";
   return n.toFixed(5);
 };
@@ -234,7 +237,15 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
 
 /* Confetti */
 type ConfettiPiece = {
-  id: number; x: number; y: number; r: number; vx: number; vy: number; s: number; d: number; delay: number;
+  id: number;
+  x: number;
+  y: number;
+  r: number;
+  vx: number;
+  vy: number;
+  s: number;
+  d: number;
+  delay: number;
 };
 const makeConfetti = (count = 110): ConfettiPiece[] =>
   Array.from({ length: count }).map((_, i) => {
@@ -255,18 +266,30 @@ const makeConfetti = (count = 110): ConfettiPiece[] =>
 
 const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   const [pieces, setPieces] = React.useState<ConfettiPiece[]>([]);
-  React.useEffect(() => { if (show) setPieces(makeConfetti()); }, [show]);
+  React.useEffect(() => {
+    if (show) setPieces(makeConfetti());
+  }, [show]);
   return (
     <AnimatePresence>
       {show && (
-        <motion.div className="absolute inset-0 overflow-hidden z-[50] pointer-events-none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div
+          className="absolute inset-0 overflow-hidden z-[50] pointer-events-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
           {pieces.map((p) => (
             <motion.span
               key={p.id}
               className="absolute block"
               style={{
-                left: `${p.x}%`, top: `${p.y}%`, width: 8, height: 10,
-                transformOrigin: "center", background: "white", borderRadius: 2,
+                left: `${p.x}%`,
+                top: `${p.y}%`,
+                width: 8,
+                height: 10,
+                transformOrigin: "center",
+                background: "white",
+                borderRadius: 2,
                 boxShadow: "0 0 8px rgba(255,255,255,.15)",
               }}
               initial={{ opacity: 0, scale: 0.4, rotate: p.r }}
@@ -286,9 +309,16 @@ const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   );
 };
 
-const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({ blur, children }) => (
+const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({
+  blur,
+  children,
+}) => (
   <div className="absolute inset-0 isolate z-40">
-    <div className={`absolute inset-0 rounded-xl transition ${blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"}`} />
+    <div
+      className={`absolute inset-0 rounded-xl transition ${
+        blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"
+      }`}
+    />
     {children}
   </div>
 );
@@ -304,7 +334,9 @@ export default function TierCard({
   tokenDecimals,
   tokenSymbol,
 }: Props) {
-  React.useEffect(() => { ensureOrbitronLink(); }, []);
+  React.useEffect(() => {
+    ensureOrbitronLink();
+  }, []);
 
   const { isConnected, address, chain, status } = useAccount();
   const publicClient = usePublicClient();
@@ -315,7 +347,12 @@ export default function TierCard({
   // Payment token env
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
   const envDecimals = Number(YEARN_TOKEN_DECIMALS);
-  const payTokenDecimals = typeof tokenDecimals === "number" ? tokenDecimals : Number.isFinite(envDecimals) ? envDecimals : 18;
+  const payTokenDecimals =
+    typeof tokenDecimals === "number"
+      ? tokenDecimals
+      : Number.isFinite(envDecimals)
+      ? envDecimals
+      : 18;
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
   const connected = isConnected && !!address;
 
@@ -409,12 +446,15 @@ export default function TierCard({
 
   const estimateApproveFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
-      if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress)) return null;
+      if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress))
+        return null;
       const need = price;
       let sum = 0n;
 
       const a = (await publicClient.readContract({
-        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        address: payTokenAddress,
+        abi: ERC20_ABI,
+        functionName: "allowance",
         args: [address, marketAddress],
       })) as bigint;
 
@@ -439,12 +479,24 @@ export default function TierCard({
         sum += f1 ?? roughApproveFee();
       }
       return sum > 0n ? sum : roughApproveFee();
-    } catch { return roughApproveFee(); }
-  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, estimateTxFee, roughApproveFee]);
+    } catch {
+      return roughApproveFee();
+    }
+  }, [
+    connected,
+    address,
+    publicClient,
+    payTokenAddress,
+    marketAddress,
+    price,
+    estimateTxFee,
+    roughApproveFee,
+  ]);
 
   const estimateBuyFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
-      if (!connected || !address || !publicClient || isZeroAddress(marketAddress)) return null;
+      if (!connected || !address || !publicClient || isZeroAddress(marketAddress))
+        return null;
       const f = await estimateTxFee({
         account: address,
         address: marketAddress,
@@ -453,8 +505,18 @@ export default function TierCard({
         args: [BigInt(tier.id), address],
       } as unknown as EstimateContractGasParameters);
       return f ?? roughBuyFee();
-    } catch { return roughBuyFee(); }
-  }, [connected, address, publicClient, marketAddress, tier.id, estimateTxFee, roughBuyFee]);
+    } catch {
+      return roughBuyFee();
+    }
+  }, [
+    connected,
+    address,
+    publicClient,
+    marketAddress,
+    tier.id,
+    estimateTxFee,
+    roughBuyFee,
+  ]);
 
   const hasEnoughFor = (needWei?: bigint | null, padBps = 800) => {
     if (!needWei || needWei <= 0n) return true;
@@ -516,7 +578,10 @@ export default function TierCard({
       } catch {}
     })();
 
-    return () => { ctrl.abort(); aborted = true; };
+    return () => {
+      ctrl.abort();
+      aborted = true;
+    };
   }, [tier.id, tier.uri, passAddress, publicClient]);
 
   /** Ownership / price / WL / allowance */
@@ -533,35 +598,51 @@ export default function TierCard({
             args: [BigInt(tier.id)],
           })) as bigint;
           if (!stop) {
-            setOwned(false); setIsWl(false); setWlPrice(0n);
-            setPubPrice(pPub); setPrice(pPub); setAllowance(0n);
+            setOwned(false);
+            setIsWl(false);
+            setWlPrice(0n);
+            setPubPrice(pPub);
+            setPrice(pPub);
+            setAllowance(0n);
           }
           return;
         }
 
         const [bal, pYour, wl, pPub, pWl, a] = await Promise.all([
           publicClient.readContract({
-            address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf",
+            address: passAddress,
+            abi: YEARNPASS1155_ABI,
+            functionName: "balanceOf",
             args: [address, BigInt(tier.id)],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress, abi: MARKET_ABI, functionName: "priceOf",
+            address: marketAddress,
+            abi: MARKET_ABI,
+            functionName: "priceOf",
             args: [BigInt(tier.id), address],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress, abi: MARKET_ABI, functionName: "isWhitelisted",
+            address: marketAddress,
+            abi: MARKET_ABI,
+            functionName: "isWhitelisted",
             args: [BigInt(tier.id), address],
           }) as Promise<boolean>,
           publicClient.readContract({
-            address: marketAddress, abi: MARKET_ABI, functionName: "pricePublic",
+            address: marketAddress,
+            abi: MARKET_ABI,
+            functionName: "pricePublic",
             args: [BigInt(tier.id)],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: marketAddress, abi: MARKET_ABI, functionName: "priceWhitelist",
+            address: marketAddress,
+            abi: MARKET_ABI,
+            functionName: "priceWhitelist",
             args: [BigInt(tier.id)],
           }) as Promise<bigint>,
           publicClient.readContract({
-            address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+            address: payTokenAddress,
+            abi: ERC20_ABI,
+            functionName: "allowance",
             args: [address, marketAddress],
           }) as Promise<bigint>,
         ]);
@@ -578,16 +659,25 @@ export default function TierCard({
         if (!stop) setErr("Unable to fetch price/whitelist right now.");
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [address, publicClient, tier.id, passAddress, marketAddress, payTokenAddress]);
 
   /** Reset on disconnect */
   React.useEffect(() => {
     if (status === "disconnected") {
-      setOwned(false); setIsWl(false); setTokenBal(0n);
-      setCelebrate(false); setTxStage("hidden"); setErr(null);
-      setShowImportHelp(false); setAllowance(0n);
-      setFeeApprove(null); setFeeBuy(null); setNativeBal(0n);
+      setOwned(false);
+      setIsWl(false);
+      setTokenBal(0n);
+      setCelebrate(false);
+      setTxStage("hidden");
+      setErr(null);
+      setShowImportHelp(false);
+      setAllowance(0n);
+      setFeeApprove(null);
+      setFeeBuy(null);
+      setNativeBal(0n);
     }
   }, [status]);
 
@@ -596,19 +686,30 @@ export default function TierCard({
     let stop = false;
     (async () => {
       try {
-        if (!connected || !address || !publicClient || !needsToken || isZeroAddress(payTokenAddress)) {
+        if (
+          !connected ||
+          !address ||
+          !publicClient ||
+          !needsToken ||
+          isZeroAddress(payTokenAddress)
+        ) {
           if (!stop) setTokenBal(0n);
           return;
         }
         const bal = (await publicClient.readContract({
-          address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address],
+          address: payTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [address],
         })) as bigint;
         if (!stop) setTokenBal(bal);
       } catch {
         if (!stop) setTokenBal(0n);
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
 
   /** Native balance watcher */
@@ -626,7 +727,9 @@ export default function TierCard({
         if (!stop) setNativeBal(0n);
       }
     })();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [connected, address, publicClient]);
 
   /** Live fee estimates */
@@ -634,17 +737,35 @@ export default function TierCard({
     let stop = false;
     (async () => {
       if (!connected || !address || !publicClient) {
-        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+        if (!stop) {
+          setFeeApprove(null);
+          setFeeBuy(null);
+        }
         return;
       }
       try {
         const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
-        if (!stop) { setFeeApprove(fa); setFeeBuy(fb); }
+        if (!stop) {
+          setFeeApprove(fa);
+          setFeeBuy(fb);
+        }
       } catch {
-        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
+        if (!stop) {
+          setFeeApprove(null);
+          setFeeBuy(null);
+        }
       }
     })();
-  }, [connected, address, publicClient, estimateApproveFee, estimateBuyFee, allowance, price, chain?.id]);
+  }, [
+    connected,
+    address,
+    publicClient,
+    estimateApproveFee,
+    estimateBuyFee,
+    allowance,
+    price,
+    chain?.id,
+  ]);
 
   /** Filter */
   React.useEffect(() => {
@@ -656,20 +777,21 @@ export default function TierCard({
       if (detail === "mine" || detail === "all") apply(detail);
     };
     window.addEventListener(FILTER_EVENT, onFilter as EventListener);
-    return () => window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
+    return () =>
+      window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
   }, [owned]);
 
   /* -------- approve/buy with gas pre-checks + friendly errors -------- */
   const rewriteGasError = (raw?: string | null) => {
     if (!raw) return null;
     const s = String(raw);
-    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(s);
+    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(
+      s
+    );
     if (match) {
       const op = lastActionRef.current;
       const need =
-        op === "buy"
-          ? (feeBuy ?? roughBuyFee())
-          : (feeApprove ?? roughApproveFee());
+        op === "buy" ? feeBuy ?? roughBuyFee() : feeApprove ?? roughApproveFee();
       return gasWarnLine(need);
     }
     return null;
@@ -681,11 +803,21 @@ export default function TierCard({
     lastActionRef.current = "approve";
 
     if (!connected || !address) {
-      try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
+      try {
+        appKit?.open?.();
+      } catch {
+        setErr("Connect your wallet first.");
+      }
       return;
     }
-    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
-    if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
+    if (!walletClient || !publicClient) {
+      setErr("Wallet or RPC is not ready.");
+      return;
+    }
+    if (isZeroAddress(payTokenAddress)) {
+      setErr("Payment token address is not set.");
+      return;
+    }
 
     // Pre-flight gas check (use rough if estimate missing)
     try {
@@ -696,7 +828,10 @@ export default function TierCard({
       }
     } catch {
       const rough = roughApproveFee();
-      if (!hasEnoughFor(rough)) { setErr(gasWarnLine(rough)); return; }
+      if (!hasEnoughFor(rough)) {
+        setErr(gasWarnLine(rough));
+        return;
+      }
     }
 
     setBusy(true);
@@ -706,7 +841,9 @@ export default function TierCard({
 
       // current allowance
       let a = (await publicClient.readContract({
-        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        address: payTokenAddress,
+        abi: ERC20_ABI,
+        functionName: "allowance",
         args: [address, marketAddress],
       })) as bigint;
 
@@ -750,7 +887,9 @@ export default function TierCard({
       }
 
       const aNew = (await publicClient.readContract({
-        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance",
+        address: payTokenAddress,
+        abi: ERC20_ABI,
+        functionName: "allowance",
         args: [address, marketAddress],
       })) as bigint;
 
@@ -763,7 +902,17 @@ export default function TierCard({
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee]);
+  }, [
+    connected,
+    address,
+    walletClient,
+    publicClient,
+    payTokenAddress,
+    marketAddress,
+    price,
+    estimateApproveFee,
+    roughApproveFee,
+  ]);
 
   /** Buy with preflight + chain switch (estimate after switch) */
   const doBuy = React.useCallback(async () => {
@@ -771,13 +920,26 @@ export default function TierCard({
     lastActionRef.current = "buy";
 
     if (!connected || !address) {
-      try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); }
+      try {
+        appKit?.open?.();
+      } catch {
+        setErr("Connect your wallet first.");
+      }
       return;
     }
-    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
+    if (!walletClient || !publicClient) {
+      setErr("Wallet or RPC is not ready.");
+      return;
+    }
     if (owned) return;
-    if (isZeroAddress(marketAddress)) { setErr("Market address is not set."); return; }
-    if (isZeroAddress(passAddress)) { setErr("Pass address is not set."); return; }
+    if (isZeroAddress(marketAddress)) {
+      setErr("Market address is not set.");
+      return;
+    }
+    if (isZeroAddress(passAddress)) {
+      setErr("Pass address is not set.");
+      return;
+    }
 
     setBusy(true);
     setTxStage("waiting");
@@ -785,9 +947,11 @@ export default function TierCard({
       // Ensure wallet is on the same chain as publicClient
       const targetChainId = publicClient.chain?.id ?? chain?.id ?? currentChainId;
       if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
-        try { await switchChainAsync({ chainId: targetChainId }); }
-        catch {
-          setBusy(false); setTxStage("hidden");
+        try {
+          await switchChainAsync({ chainId: targetChainId });
+        } catch {
+          setBusy(false);
+          setTxStage("hidden");
           setErr("Please switch to the correct network.");
           return;
         }
@@ -795,14 +959,16 @@ export default function TierCard({
 
       // Re-read price and balances right before sending
       const currentPrice = (await publicClient.readContract({
-        address: marketAddress, abi: MARKET_ABI,
+        address: marketAddress,
+        abi: MARKET_ABI,
         functionName: address ? "priceOf" : "pricePublic",
         args: address ? [BigInt(tier.id), address] : [BigInt(tier.id)],
       })) as bigint;
       setPrice(currentPrice);
 
       if (needsToken && tokenBal < currentPrice) {
-        setBusy(false); setTxStage("hidden");
+        setBusy(false);
+        setTxStage("hidden");
         setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
         return;
       }
@@ -811,14 +977,16 @@ export default function TierCard({
       try {
         const est = (await estimateBuyFee()) ?? roughBuyFee();
         if (est > 0n && !hasEnoughFor(est)) {
-          setBusy(false); setTxStage("hidden");
+          setBusy(false);
+          setTxStage("hidden");
           setErr(gasWarnLine(est));
           return;
         }
       } catch {
         const rough = roughBuyFee();
         if (!hasEnoughFor(rough)) {
-          setBusy(false); setTxStage("hidden");
+          setBusy(false);
+          setTxStage("hidden");
           setErr(gasWarnLine(rough));
           return;
         }
@@ -853,7 +1021,9 @@ export default function TierCard({
       if (receipt.status !== "success") throw new Error("Transaction reverted.");
 
       const bal = (await publicClient.readContract({
-        address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf",
+        address: passAddress,
+        abi: YEARNPASS1155_ABI,
+        functionName: "balanceOf",
         args: [address, BigInt(tier.id)],
       })) as bigint;
 
@@ -863,7 +1033,9 @@ export default function TierCard({
       if (needsToken) {
         try {
           const newBal = (await publicClient.readContract({
-            address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf",
+            address: payTokenAddress,
+            abi: ERC20_ABI,
+            functionName: "balanceOf",
             args: [address],
           })) as bigint;
           setTokenBal(newBal);
@@ -874,7 +1046,10 @@ export default function TierCard({
         setTxStage("success");
         setCelebrate(true);
         if (isMobile()) setShowImportHelp(true);
-        setTimeout(() => { setTxStage("hidden"); setCelebrate(false); }, 1800);
+        setTimeout(() => {
+          setTxStage("hidden");
+          setCelebrate(false);
+        }, 1800);
       } else {
         setTxStage("hidden");
       }
@@ -886,13 +1061,35 @@ export default function TierCard({
     } finally {
       setBusy(false);
     }
-  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee]);
+  }, [
+    connected,
+    address,
+    walletClient,
+    publicClient,
+    owned,
+    marketAddress,
+    passAddress,
+    chain?.id,
+    currentChainId,
+    switchChainAsync,
+    tier.id,
+    needsToken,
+    tokenBal,
+    payTokenSymbol,
+    estimateBuyFee,
+    roughBuyFee,
+  ]);
 
   // Labels
-  const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
+  const yourPriceLabel = priceIsFree
+    ? "Free"
+    : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
   const pubPriceLabel = `${formatUnits(pubPrice, payTokenDecimals)} ${payTokenSymbol}`;
   const wlPriceLabel = `${formatUnits(wlPrice, payTokenDecimals)} ${payTokenSymbol}`;
-  const youSave = pubPrice > price ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}` : null;
+  const youSave =
+    pubPrice > price
+      ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}`
+      : null;
 
   // Tilt + glare
   const { x, y, rotateX, rotateY, onMove } = useTilt3D();
@@ -903,20 +1100,21 @@ export default function TierCard({
   if (!visible) return null;
 
   const checksumPass = React.useMemo(() => {
-    try { return getAddress(passAddress); } catch { return passAddress; }
+    try {
+      return getAddress(passAddress);
+    } catch {
+      return passAddress;
+    }
   }, [passAddress]);
+
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
   const lowApprove =
-    connected &&
-    (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove));
-
+    connected && (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove));
   const lowBuy =
-    connected &&
-    (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy));
-
-  const showGasChip = (lowApprove && allowance < price) || lowBuy;
+    connected && (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy));
+  const showGasChip = !owned && ((lowApprove && allowance < price) || lowBuy);
 
   return (
     <motion.div
@@ -938,12 +1136,12 @@ export default function TierCard({
               style={{ transform: "translateZ(30px)", contain: "content" }}
             >
               <CornerRibbon show={isWl} />
-              {needsToken && (
+              {needsToken && !owned && (
                 <div className="absolute top-3 right-3 z-30">
                   <div className="relative">
                     <div className="absolute -inset-2 blur-md bg-gradient-to-r from-indigo-400/25 to-cyan-300/20 rounded-full" />
                   </div>
-                  {connected && !owned && !hasFunds && (
+                  {connected && !hasFunds && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/15 text-red-100 ring-1 ring-red-400/30 text-[11px]">
                       <AlertCircle className="w-3 h-3" />
                       Insufficient {payTokenSymbol}
@@ -1006,7 +1204,10 @@ export default function TierCard({
             {/* CONTENT */}
             <div className="p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-white/90 font-semibold truncate tracking-wide font-orbitron" title={name}>
+                <h3
+                  className="text-white/90 font-semibold truncate tracking-wide font-orbitron"
+                  title={name}
+                >
                   {name}
                 </h3>
                 <div className="flex items-center gap-2">
@@ -1032,6 +1233,7 @@ export default function TierCard({
                 </div>
               </div>
 
+              {/* Price row (still useful even when owned, to show original price) */}
               <div className="mt-2 flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <div className="absolute inset-0 blur-md bg-gradient-to-r from-indigo-400/20 to-cyan-300/20 rounded-full" />
@@ -1056,7 +1258,10 @@ export default function TierCard({
                       Public: {pubPriceLabel}
                     </span>
 
-                    <span className="text-[11px] md:text-xs text-indigo-200/90" title={`Whitelist price: ${wlPriceLabel}`}>
+                    <span
+                      className="text-[11px] md:text-xs text-indigo-200/90"
+                      title={`Whitelist price: ${wlPriceLabel}`}
+                    >
                       WL: {wlPriceLabel}
                     </span>
                   </>
@@ -1074,10 +1279,11 @@ export default function TierCard({
                 )}
               </div>
 
-              {connected && needsToken && (
+              {/* Balances + gas warnings (hidden when owned) */}
+              {!owned && connected && needsToken && (
                 <div className="mt-1 text-[11px] md:text-xs text-white/60">
                   Balance: {format3(tokenBal, payTokenDecimals)} {payTokenSymbol}
-                  {connected && !owned && !hasFunds && (
+                  {connected && !hasFunds && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full px-2 py-[2px] bg-red-500/10 text-red-200 ring-1 ring-red-400/20">
                       <AlertCircle className="w-3 h-3" /> Insufficient {payTokenSymbol}
                     </span>
@@ -1085,95 +1291,94 @@ export default function TierCard({
                 </div>
               )}
 
-              {connected && showGasChip && (
+              {!owned && connected && showGasChip && (
                 <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/20">
                   <AlertCircle className="w-3.5 h-3.5" />
                   Low {feeSymbol} for network fees. You have ~{format5(nativeBal)} {feeSymbol}.
                 </div>
               )}
 
-              {needsToken && allowance < price ? (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button
-                    onClick={doApprove}
-                    disabled={busy}
-                    className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
-                    title={
-                      connected &&
-                      (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove))
-                        ? `Need ~${format5(feeApprove ?? roughApproveFee())} ${feeSymbol} for gas`
-                        : undefined
-                    }
-                  >
-                    {busy ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Approving…
+              {/* ACTIONS — hidden entirely when owned */}
+              {!owned && (
+                <>
+                  {needsToken && allowance < price ? (
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <button
+                        onClick={doApprove}
+                        disabled={busy}
+                        className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
+                        title={
+                          connected &&
+                          (!feeApprove
+                            ? !hasEnoughFor(roughApproveFee())
+                            : !hasEnoughFor(feeApprove))
+                            ? `Need ~${format5(feeApprove ?? roughApproveFee())} ${feeSymbol} for gas`
+                            : undefined
+                        }
+                      >
+                        {busy ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Approving…
+                          </span>
+                        ) : (
+                          "Approve"
+                        )}
+                      </button>
+                      <button
+                        disabled
+                        className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                        title="Approve first"
+                      >
+                        Buy
+                      </button>
+                    </div>
+                  ) : (
+                    <motion.button
+                      onClick={doBuy}
+                      disabled={busy || (!hasFunds && needsToken)}
+                      whileTap={{ scale: 0.985 }}
+                      className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
+                        !hasFunds && needsToken
+                          ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                          : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
+                      }`}
+                      title={
+                        connected &&
+                        (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy))
+                          ? `Need ~${format5(feeBuy ?? roughBuyFee())} ${feeSymbol} for gas`
+                          : undefined
+                      }
+                    >
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
+                      />
+                      <span className="relative flex items-center gap-2">
+                        {busy ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
+                          </>
+                        ) : !connected ? (
+                          <>
+                            <Wallet2 className="w-4 h-4" /> Connect to Buy
+                          </>
+                        ) : priceIsFree ? (
+                          <>
+                            <SparkIcon className="w-4 h-4" /> Claim Free NFT
+                          </>
+                        ) : !hasFunds && needsToken ? (
+                          <>
+                            <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
+                          </>
+                        ) : (
+                          <>
+                            <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
+                          </>
+                        )}
                       </span>
-                    ) : (
-                      "Approve"
-                    )}
-                  </button>
-                  <button
-                    disabled
-                    className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                    title="Approve first"
-                  >
-                    Buy
-                  </button>
-                </div>
-              ) : (
-                <motion.button
-                  onClick={doBuy}
-                  disabled={owned || busy || (!hasFunds && needsToken)}
-                  whileTap={{ scale: 0.985 }}
-                  className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
-                    owned
-                      ? "bg-black/40 text-white/70 ring-1 ring-white/10 cursor-default hover:bg-black/45 transition"
-                      : !hasFunds && needsToken
-                      ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                      : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
-                  }`}
-                  title={
-                    connected &&
-                    (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy))
-                      ? `Need ~${format5(feeBuy ?? roughBuyFee())} ${feeSymbol} for gas`
-                      : undefined
-                  }
-                >
-                  {!owned && (
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
-                    />
+                    </motion.button>
                   )}
-                  <span className="relative flex items-center gap-2">
-                    {busy ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
-                      </>
-                    ) : owned ? (
-                      <>
-                        <Check className="w-4 h-4 text-emerald-300/90" /> Claimed
-                      </>
-                    ) : !connected ? (
-                      <>
-                        <Wallet2 className="w-4 h-4" /> Connect to Buy
-                      </>
-                    ) : priceIsFree ? (
-                      <>
-                        <SparkIcon className="w-4 h-4" /> Claim Free NFT
-                      </>
-                    ) : !hasFunds && needsToken ? (
-                      <>
-                        <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
-                      </>
-                    )}
-                  </span>
-                </motion.button>
+                </>
               )}
 
               <AnimatePresence>
@@ -1202,8 +1407,7 @@ export default function TierCard({
                       ✅ Added to your vault <Sparkles />
                     </div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
-                      You can see your NFT in your wallet{" "}
-                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                      You can see your NFT in your wallet <ExternalLink className="w-3.5 h-3.5 opacity-80" />
                     </div>
                   </motion.div>
                 )}
@@ -1222,22 +1426,23 @@ export default function TierCard({
                         : "Don’t see your NFT in MetaMask Mobile? Import it manually"}
                     </span>
                     <ChevronDown
-                      className={`w-4 h-4 transition ${
-                        showImportHelp ? "rotate-180" : "rotate-0"
-                      }`}
+                      className={`w-4 h-4 transition ${showImportHelp ? "rotate-180" : "rotate-0"}`}
                     />
                   </button>
 
                   <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
                     <div className="px-3 pt-3 pb-2 text-[12px] text-white/75 space-y-2">
                       <p>
-                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. You can
-                        import it manually:
+                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. You can import it manually:
                       </p>
                       <ol className="list-decimal list-inside space-y-1">
-                        <li>Open <strong>MetaMask</strong> ➜ <strong>NFTs</strong> tab.</li>
+                        <li>
+                          Open <strong>MetaMask</strong> ➜ <strong>NFTs</strong> tab.
+                        </li>
                         <li>Tap <strong>Import NFTs</strong>.</li>
-                        <li>Paste the <em>Contract Address</em> and <em>Token ID</em>.</li>
+                        <li>
+                          Paste the <em>Contract Address</em> and <em>Token ID</em>.
+                        </li>
                       </ol>
                       <div className="mt-2 space-y-2">
                         <CopyField label="Contract" value={checksumPass} />
@@ -1246,8 +1451,7 @@ export default function TierCard({
                       </div>
                       {isMetaMaskUA() && isMobile() && (
                         <p className="pt-1 opacity-80">
-                          Tip: After import, pull down to refresh if it doesn’t appear
-                          immediately.
+                          Tip: After import, pull down to refresh if it doesn’t appear immediately.
                         </p>
                       )}
                     </div>
