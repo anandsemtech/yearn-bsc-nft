@@ -323,6 +323,16 @@ const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({
   </div>
 );
 
+/** Open wallet connect modal */
+const openConnect = () => {
+  try {
+    appKit?.open?.();
+  } catch {}
+};
+
+/** Safer gas-chip guards */
+const hasValue = (v?: bigint | null) => typeof v === "bigint" && v > 0n;
+
 /* ──────────────────────────────────────────────────────────────
    Main
    ────────────────────────────────────────────────────────────── */
@@ -1110,11 +1120,14 @@ export default function TierCard({
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
-  const lowApprove =
-    connected && (!feeApprove ? !hasEnoughFor(roughApproveFee()) : !hasEnoughFor(feeApprove));
-  const lowBuy =
-    connected && (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy));
-  const showGasChip = !owned && ((lowApprove && allowance < price) || lowBuy);
+  // Gas chip only when we have a real estimate
+  const haveFeeApprove = hasValue(feeApprove);
+  const haveFeeBuy = hasValue(feeBuy);
+  const showGasChip =
+    !owned &&
+    connected &&
+    ((allowance < price && haveFeeApprove && !hasEnoughFor(feeApprove)) ||
+      (haveFeeBuy && !hasEnoughFor(feeBuy)));
 
   return (
     <motion.div
@@ -1124,14 +1137,15 @@ export default function TierCard({
       className="scroll-mt-24 last:mb-28 md:last:mb-32"
     >
       <div className="relative" onMouseMove={onMove} style={{ perspective: 1200 }}>
-        <motion.div style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
+        <motion.div layout style={{ rotateX, rotateY, transformStyle: "preserve-3d" as any }}>
           <HoloCard>
             <CursorGlow x={x} y={y} />
             <GradientMesh />
             <Scanlines />
 
             {/* MEDIA */}
-            <div
+            <motion.div
+              layout
               className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass"
               style={{ transform: "translateZ(30px)", contain: "content" }}
             >
@@ -1199,7 +1213,7 @@ export default function TierCard({
                 <ConfettiShower show={celebrate} />
                 <TxDialog stage={txStage} />
               </OverlayLayer>
-            </div>
+            </motion.div>
 
             {/* CONTENT */}
             <div className="p-4">
@@ -1225,7 +1239,7 @@ export default function TierCard({
                     <motion.span
                       initial={{ y: -6, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-300/20"
+                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-gradient-to-r from-emerald-500/20 to-teal-400/20 text-emerald-200 ring-1 ring-emerald-300/30 shadow-[0_0_20px_rgba(16,185,129,0.20)]"
                     >
                       <Shield className="w-3.5 h-3.5" /> Owned
                     </motion.span>
@@ -1291,7 +1305,7 @@ export default function TierCard({
                 </div>
               )}
 
-              {!owned && connected && showGasChip && (
+              {!owned && showGasChip && (
                 <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/20">
                   <AlertCircle className="w-3.5 h-3.5" />
                   Low {feeSymbol} for network fees. You have ~{format5(nativeBal)} {feeSymbol}.
@@ -1301,82 +1315,94 @@ export default function TierCard({
               {/* ACTIONS — hidden entirely when owned */}
               {!owned && (
                 <>
-                  {needsToken && allowance < price ? (
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button
-                        onClick={doApprove}
-                        disabled={busy}
-                        className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40"
-                        title={
-                          connected &&
-                          (!feeApprove
-                            ? !hasEnoughFor(roughApproveFee())
-                            : !hasEnoughFor(feeApprove))
-                            ? `Need ~${format5(feeApprove ?? roughApproveFee())} ${feeSymbol} for gas`
-                            : undefined
-                        }
-                      >
-                        {busy ? (
-                          <span className="inline-flex items-center gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" /> Approving…
-                          </span>
-                        ) : (
-                          "Approve"
-                        )}
-                      </button>
-                      <button
-                        disabled
-                        className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                        title="Approve first"
-                      >
-                        Buy
-                      </button>
-                    </div>
-                  ) : (
+                  {/* Not connected: only show Connect Wallet */}
+                  {!connected ? (
                     <motion.button
-                      onClick={doBuy}
-                      disabled={busy || (!hasFunds && needsToken)}
+                      onClick={openConnect}
                       whileTap={{ scale: 0.985 }}
-                      className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
-                        !hasFunds && needsToken
-                          ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                          : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
-                      }`}
-                      title={
-                        connected &&
-                        (!feeBuy ? !hasEnoughFor(roughBuyFee()) : !hasEnoughFor(feeBuy))
-                          ? `Need ~${format5(feeBuy ?? roughBuyFee())} ${feeSymbol} for gas`
-                          : undefined
-                      }
+                      className="group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                     >
                       <span
                         aria-hidden
                         className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
                       />
                       <span className="relative flex items-center gap-2">
-                        {busy ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
-                          </>
-                        ) : !connected ? (
-                          <>
-                            <Wallet2 className="w-4 h-4" /> Connect to Buy
-                          </>
-                        ) : priceIsFree ? (
-                          <>
-                            <SparkIcon className="w-4 h-4" /> Claim Free NFT
-                          </>
-                        ) : !hasFunds && needsToken ? (
-                          <>
-                            <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
-                          </>
-                        ) : (
-                          <>
-                            <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
-                          </>
-                        )}
+                        <Wallet2 className="w-4 h-4" /> Connect Wallet
                       </span>
                     </motion.button>
+                  ) : (
+                    // Connected: normal approve/buy flow
+                    <>
+                      {needsToken && allowance < price ? (
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          <button
+                            onClick={doApprove}
+                            disabled={busy}
+                            className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 font-orbitron"
+                            title={
+                              haveFeeApprove && !hasEnoughFor(feeApprove)
+                                ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas`
+                                : undefined
+                            }
+                          >
+                            {busy ? (
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin" /> Approving…
+                              </span>
+                            ) : (
+                              "Approve"
+                            )}
+                          </button>
+                          <button
+                            disabled
+                            className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron"
+                            title="Approve first"
+                          >
+                            Buy
+                          </button>
+                        </div>
+                      ) : (
+                        <motion.button
+                          onClick={doBuy}
+                          disabled={busy || (!hasFunds && needsToken)}
+                          whileTap={{ scale: 0.985 }}
+                          className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
+                            !hasFunds && needsToken
+                              ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
+                              : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
+                          }`}
+                          title={
+                            haveFeeBuy && !hasEnoughFor(feeBuy)
+                              ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas`
+                              : undefined
+                          }
+                        >
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
+                          />
+                          <span className="relative flex items-center gap-2">
+                            {busy ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin text-white/80" /> Processing…
+                              </>
+                            ) : priceIsFree ? (
+                              <>
+                                <SparkIcon className="w-4 h-4" /> Claim Free NFT
+                              </>
+                            ) : !hasFunds && needsToken ? (
+                              <>
+                                <AlertCircle className="w-4 h-4" /> Insufficient {payTokenSymbol}
+                              </>
+                            ) : (
+                              <>
+                                <ShoppingCart className="w-4 h-4 text-indigo-200/90" /> Buy
+                              </>
+                            )}
+                          </span>
+                        </motion.button>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -1418,9 +1444,9 @@ export default function TierCard({
                   <button
                     type="button"
                     onClick={() => setShowImportHelp((s) => !s)}
-                    className="w-full inline-flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
+                    className="w-full inline-flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] bg-black/35 ring-1 ring-white/10 hover:bg-black/45"
                   >
-                    <span className="text-white/80">
+                    <span className="text-white/85">
                       {owned
                         ? "How to add this NFT to MetaMask"
                         : "Don’t see your NFT in MetaMask Mobile? Import it manually"}
@@ -1430,10 +1456,15 @@ export default function TierCard({
                     />
                   </button>
 
-                  <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
-                    <div className="px-3 pt-3 pb-2 text-[12px] text-white/75 space-y-2">
-                      <p>
-                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. You can import it manually:
+                  <motion.div
+                    layout
+                    initial={false}
+                    animate={{ height: showImportHelp ? "auto" : 0, opacity: showImportHelp ? 1 : 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
+                      <p className="leading-relaxed">
+                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. Import it manually:
                       </p>
                       <ol className="list-decimal list-inside space-y-1">
                         <li>
@@ -1444,18 +1475,58 @@ export default function TierCard({
                           Paste the <em>Contract Address</em> and <em>Token ID</em>.
                         </li>
                       </ol>
+
                       <div className="mt-2 space-y-2">
-                        <CopyField label="Contract" value={checksumPass} />
-                        <CopyField label="Token ID (decimal)" value={String(tier.id)} mono />
-                        <CopyField label="Token ID (hex)" value={`0x${idHex64(tier.id)}`} mono />
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="opacity-70">Contract:</span>
+                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
+                            {checksumPass}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard.writeText(checksumPass)}
+                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
+                          >
+                            <CopyIcon className="w-3.5 h-3.5" /> Copy
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="opacity-70">Token ID (decimal):</span>
+                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
+                            {tokenIdDec}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard.writeText(tokenIdDec)}
+                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
+                          >
+                            <CopyIcon className="w-3.5 h-3.5" /> Copy
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="opacity-70">Token ID (hex):</span>
+                          <code className="px-1.5 py-[2px] rounded bg-white/[0.06] ring-1 ring-indigo-400/30 font-mono">
+                            {tokenIdHex}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard.writeText(tokenIdHex)}
+                            className="inline-flex items-center gap-1 px-1.5 py-1 rounded bg-indigo-500/10 ring-1 ring-indigo-400/30 hover:bg-indigo-500/15"
+                          >
+                            <CopyIcon className="w-3.5 h-3.5" /> Copy
+                          </button>
+                        </div>
+
+                        {isMetaMaskUA() && isMobile() && (
+                          <p className="pt-1 opacity-75">
+                            Tip: Pull down to refresh if it doesn’t appear immediately.
+                          </p>
+                        )}
                       </div>
-                      {isMetaMaskUA() && isMobile() && (
-                        <p className="pt-1 opacity-80">
-                          Tip: After import, pull down to refresh if it doesn’t appear immediately.
-                        </p>
-                      )}
                     </div>
-                  </div>
+                  </motion.div>
                 </div>
               )}
             </div>
@@ -1467,10 +1538,6 @@ export default function TierCard({
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes spin-rev { to { transform: rotate(-360deg); } }
         .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
-
-        .acc { overflow: hidden; transition: max-height 0.22s ease, opacity 0.22s ease; will-change: max-height, opacity; }
-        .acc-closed { max-height: 0; opacity: 0; }
-        .acc-open   { max-height: 360px; opacity: 1; }
       `}</style>
     </motion.div>
   );
@@ -1487,7 +1554,7 @@ function CornerRibbon({ show }: { show: boolean }) {
       className="absolute top-2 left-2 z-30"
     >
       <div
-        className="px-3 py-1 text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-400 ring-1 ring-white/10 shadow rounded-sm"
+        className="px-3 py-1 text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-white bg-[linear-gradient(135deg,#6366f1_0%,#06b6d4_100%)] ring-1 ring-white/10 shadow rounded-sm"
         style={{ clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0% 100%)" }}
         title="You're whitelisted for this tier"
       >
