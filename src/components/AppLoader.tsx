@@ -14,13 +14,20 @@ type Props = {
   show: boolean;
   onDone?: () => void;
   durationMs?: number;
+  version?: string;
 };
 
 const RING_SIZE = 164;
 const RING_STROKE = 7;
 
-export default function AppLoader({ show, onDone, durationMs = 2600 }: Props) {
+export default function AppLoader({ show, onDone, durationMs = 2600, version }: Props) {
   const [progress, setProgress] = React.useState(0);
+
+  const resolvedVersion =
+    version ??
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_APP_VERSION) ??
+    (typeof process !== "undefined" && (process as any).env?.REACT_APP_VERSION) ??
+    "v0.0.0";
 
   // progress timeline
   React.useEffect(() => {
@@ -106,6 +113,16 @@ export default function AppLoader({ show, onDone, durationMs = 2600 }: Props) {
               <Cpu className="w-3.5 h-3.5 animate-pulse" />
               <span>Synchronizing nodes… {progress}%</span>
             </div>
+          </div>
+
+          {/* Version badge — bottom-left */}
+          <div
+            className="version-badge"
+            aria-label={`App version ${resolvedVersion}`}
+            data-version={resolvedVersion}
+            title={`Version ${resolvedVersion}`}
+          >
+            {resolvedVersion}
           </div>
 
           {/* scoped CSS */}
@@ -351,6 +368,25 @@ const css = `
 .orbit-node.n3 { transform: translate(100px,100px) rotate(240deg) translate(72px,0); }
 .core-spiral { animation: spiralFade 4.8s ease-in-out infinite; transform-origin: 100px 100px; opacity:.8; }
 @keyframes spiralFade { 0%,100%{opacity:.65} 50%{opacity:1} }
+
+/* Version badge */
+.version-badge {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 10000;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: rgba(255,255,255,0.85);
+  background: linear-gradient(180deg, rgba(17,24,39,0.75), rgba(7,10,17,0.75));
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.22);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.25), inset 0 0 12px rgba(99,102,241,0.15);
+  pointer-events: none; /* non-interactive, purely informational */
+}
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
