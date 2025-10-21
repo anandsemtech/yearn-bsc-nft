@@ -46,11 +46,12 @@ import {
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
+/* 🔧 NEW: loader assets */
+import BotVideo from "../assets/BotVideoAnimation.webm";
+import BotPoster from "../assets/BotVideoPosterBlur.jpg";
+
 /* ---------- tiny logger (debug-level) ---------- */
-const log = (...args: any[]) => {
-  // Using debug to keep console clean in prod (can be filtered)
-  console.debug("[TierCard]", ...args);
-};
+const log = (...args: any[]) => console.debug("[TierCard]", ...args);
 
 /* Fonts once */
 const ensureOrbitronLink = (() => {
@@ -58,10 +59,7 @@ const ensureOrbitronLink = (() => {
   return () => {
     if (done || typeof document === "undefined") return;
     const existing = document.querySelector('link[data-font="orbitron-audiowide"]');
-    if (existing) {
-      done = true;
-      return;
-    }
+    if (existing) { done = true; return; }
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.setAttribute("data-font", "orbitron-audiowide");
@@ -75,8 +73,7 @@ const ensureOrbitronLink = (() => {
 /** Env overrides */
 const ENV_COLLECTION_URI =
   (import.meta as any)?.env?.VITE_COLLECTION_URI ||
-  (import.meta as any)?.env?.COLLECTION_URI ||
-  "";
+  (import.meta as any)?.env?.COLLECTION_URI || "";
 const DEFAULT_IPFS_GATEWAY =
   (import.meta as any)?.env?.VITE_IPFS_GATEWAY || "https://ipfs.io/ipfs/";
 const ID_FORMAT = (
@@ -89,59 +86,44 @@ const isMobile = () =>
 const isMetaMaskUA = () =>
   typeof window !== "undefined" && (window as any)?.ethereum?.isMetaMask === true;
 
-// Put below: const isMetaMaskUA = ...
 const shortenMid = (v?: string, left = 10, right = 6) => {
   if (!v) return "";
   if (v.length <= left + right + 3) return v;
   return `${v.slice(0, left)}…${v.slice(-right)}`;
 };
 
-// Low-end device detector: trims effects & heavy animations on weak phones
 const isLowEndDevice = () => {
   try {
     const mem = (navigator as any).deviceMemory || 0;
     const cores = navigator.hardwareConcurrency || 0;
     return isMobile() && ((mem && mem <= 4) || (cores && cores <= 4));
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 };
 
 const isLikelyImage = (u?: string) =>
   !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
 const isLikelyVideo = (u?: string) =>
   !!u && /\.(mp4|webm|mov|ogv)$/i.test(u.split("?")[0] ?? "");
-const isGif = (u?: string) =>
-  !!u && /\.gif(\?.*)?$/i.test((u.split("?")[0] ?? ""));
-const isSvg = (u?: string) =>
-  !!u && /\.svg(\?.*)?$/i.test((u.split("?")[0] ?? ""));
+const isGif = (u?: string) => !!u && /\.gif(\?.*)?$/i.test((u.split("?")[0] ?? ""));
+const isSvg = (u?: string) => !!u && /\.svg(\?.*)?$/i.test((u.split("?")[0] ?? ""));
 
-// Optional lightweight IPFS image optimizer (works with Cloudflare IPFS or any gateway that ignores unknown params)
 const optimizeImageUrl = (url?: string, width = 800) => {
-  if (!url || !isLikelyImage(url) || isGif(url) || isSvg(url)) return url; // ← do not touch GIF/SVG
+  if (!url || !isLikelyImage(url) || isGif(url) || isSvg(url)) return url;
   try {
     const u = new URL(url);
-
-    // Soft hints (ignored by most gateways)
     if (!u.searchParams.has("width")) u.searchParams.set("width", String(width));
     if (!u.searchParams.has("format")) u.searchParams.set("format", "auto");
-
     const host = u.host.toLowerCase();
     const isPlainIpfs = /(^|\.)ipfs\.io$|(^|\.)dweb\.link$/.test(host);
     if (isPlainIpfs) {
       const original = u.toString();
-      // WebP via weserv for non-GIF/SVG only
       return `https://wsrv.nl/?url=${encodeURIComponent(original)}&w=${width}&output=webp&we&il`;
     }
     return u.toString();
-  } catch {
-    return url;
-  }
+  } catch { return url; }
 };
 
-/** Build responsive src/srcSet for images (ipfs.io supported via proxy). */
 const buildSrcSet = (url?: string) => {
-  // For GIF/SVG: keep original (no srcset), avoids losing animation or vector sharpness
   if (!url || !isLikelyImage(url) || isGif(url) || isSvg(url)) {
     return { src: url, srcSet: undefined, sizes: undefined };
   }
@@ -157,7 +139,7 @@ const buildSrcSet = (url?: string) => {
 const CopyField: React.FC<{
   label: string;
   value: string;
-  display?: string; // pretty, shortened version (shown)
+  display?: string;
   mono?: boolean;
   color?: "indigo" | "cyan" | "violet";
 }> = ({ label, value, display, mono, color = "indigo" }) => {
@@ -210,14 +192,12 @@ type Props = {
 
 const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
 
-/** Format bigint token to exactly 3 decimals */
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
   const [i, d = ""] = str.split(".");
   const dec = (d + "000").slice(0, 3);
   return `${i}.${dec}`;
 };
-/** Format native balance/fee to 5 dp (for gas) — rounds and floors tiny values */
 const format5 = (value: bigint, decimals = 18) => {
   const s = formatUnits(value, decimals);
   const n = Number(s);
@@ -226,14 +206,12 @@ const format5 = (value: bigint, decimals = 18) => {
   return n.toFixed(5);
 };
 
-/** IPFS helper */
 const ipfsToHttp = (uri?: string, gateway = DEFAULT_IPFS_GATEWAY): string | undefined => {
   if (!uri) return undefined;
   if (uri.startsWith("ipfs://")) return gateway + uri.slice("ipfs://".length);
   return uri;
 };
 
-/** ERC-1155 placeholder resolver */
 const idHex64 = (n: number) => toHex(BigInt(n)).slice(2).toLowerCase().padStart(64, "0");
 const resolveTokenJsonUrl = (template: string, id: number): string => {
   if (!template) return "";
@@ -260,10 +238,7 @@ type TxStage = "hidden" | "waiting" | "confirming" | "success";
 const stageCopy: Record<TxStage, { title: string; subtitle: string }> = {
   hidden: { title: "", subtitle: "" },
   waiting: { title: "Waiting…", subtitle: "Approve payment token if prompted" },
-  confirming: {
-    title: "Confirming…",
-    subtitle: "Your transaction is being confirmed on-chain",
-  },
+  confirming: { title: "Confirming…", subtitle: "Your transaction is being confirmed on-chain" },
   success: { title: "Success!", subtitle: "NFT is added to your wallet" },
 };
 
@@ -282,9 +257,7 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
       >
         <motion.div
           className={`pointer-events-auto relative mx-4 w-full max-w-sm rounded-2xl ${
-            isSuccess
-              ? "bg-black/40 ring-1 ring-emerald-300/20"
-              : "bg-[#0b0f17]/85 ring-1 ring-white/10"
+            isSuccess ? "bg-black/40 ring-1 ring-emerald-300/20" : "bg-[#0b0f17]/85 ring-1 ring-white/10"
           } p-5 text-center`}
           initial={{ scale: 0.96, y: 8 }}
           animate={{ scale: 1, y: 0 }}
@@ -292,25 +265,11 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
           transition={{ type: "spring", stiffness: 200, damping: 20 }}
         >
           <div className="flex items-center justify-center mb-3">
-            {isSuccess ? (
-              <Check className="w-6 h-6 text-emerald-300" />
-            ) : (
-              <Loader2 className="w-6 h-6 text-white/85 animate-spin" />
-            )}
+            {isSuccess ? <Check className="w-6 h-6 text-emerald-300" /> : <Loader2 className="w-6 h-6 text-white/85 animate-spin" />}
           </div>
-          <h4
-            className={`font-semibold ${
-              isSuccess ? "text-emerald-200" : "text-white/90"
-            }`}
-          >
-            {title}
-          </h4>
+          <h4 className={`font-semibold ${isSuccess ? "text-emerald-200" : "text-white/90"}`}>{title}</h4>
           <p className="mt-1 text-sm text-white/70">{subtitle}</p>
-          {isSuccess && (
-            <p className="mt-2 text-xs text-emerald-200/85">
-              You can see your NFT in your wallet.
-            </p>
-          )}
+          {isSuccess && <p className="mt-2 text-xs text-emerald-200/85">You can see your NFT in your wallet.</p>}
         </motion.div>
       </motion.div>
     </AnimatePresence>
@@ -318,17 +277,7 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
 };
 
 /* Confetti */
-type ConfettiPiece = {
-  id: number;
-  x: number;
-  y: number;
-  r: number;
-  vx: number;
-  vy: number;
-  s: number;
-  d: number;
-  delay: number;
-};
+type ConfettiPiece = { id: number; x: number; y: number; r: number; vx: number; vy: number; s: number; d: number; delay: number; };
 const makeConfetti = (count = 110): ConfettiPiece[] =>
   Array.from({ length: count }).map((_, i) => {
     const angle = Math.random() * Math.PI - Math.PI / 2;
@@ -348,40 +297,21 @@ const makeConfetti = (count = 110): ConfettiPiece[] =>
 
 const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   const [pieces, setPieces] = React.useState<ConfettiPiece[]>([]);
-  React.useEffect(() => {
-    if (show) setPieces(makeConfetti());
-  }, [show]);
+  React.useEffect(() => { if (show) setPieces(makeConfetti()); }, [show]);
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
-          className="absolute inset-0 overflow-hidden z-[50] pointer-events-none"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
+        <motion.div className="absolute inset-0 overflow-hidden z-[50] pointer-events-none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           {pieces.map((p) => (
             <motion.span
               key={p.id}
               className="absolute block"
               style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                width: 8,
-                height: 10,
-                transformOrigin: "center",
-                background: "white",
-                borderRadius: 2,
-                boxShadow: "0 0 8px rgba(255,255,255,.15)",
+                left: `${p.x}%`, top: `${p.y}%`, width: 8, height: 10,
+                transformOrigin: "center", background: "white", borderRadius: 2, boxShadow: "0 0 8px rgba(255,255,255,.15)"
               }}
               initial={{ opacity: 0, scale: 0.4, rotate: p.r }}
-              animate={{
-                opacity: [0, 1, 1, 0],
-                x: [0, p.vx * 0.35, p.vx * 0.7],
-                y: [0, p.vy * 0.5, p.vy],
-                rotate: [p.r, p.r + 360],
-                scale: [p.s, p.s * 0.9, p.s * 0.8],
-              }}
+              animate={{ opacity: [0, 1, 1, 0], x: [0, p.vx * 0.35, p.vx * 0.7], y: [0, p.vy * 0.5, p.vy], rotate: [p.r, p.r + 360], scale: [p.s, p.s * 0.9, p.s * 0.8] }}
               transition={{ delay: p.delay, duration: p.d, ease: "easeOut" }}
             />
           ))}
@@ -391,29 +321,83 @@ const ConfettiShower: React.FC<{ show: boolean }> = ({ show }) => {
   );
 };
 
-const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({
-  blur,
-  children,
-}) => (
+const OverlayLayer: React.FC<{ blur: boolean; children?: React.ReactNode }> = ({ blur, children }) => (
   <div className="absolute inset-0 isolate z-40">
-    <div
-      className={`absolute inset-0 rounded-xl transition ${
-        blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"
-      }`}
-    />
+    <div className={`absolute inset-0 rounded-xl transition ${blur ? "backdrop-blur-md bg-black/35" : "backdrop-blur-0 bg-transparent"}`} />
     {children}
   </div>
 );
 
 /** Open wallet connect modal */
-const openConnect = () => {
-  try {
-    appKit?.open?.();
-  } catch {}
-};
+const openConnect = () => { try { appKit?.open?.(); } catch {} };
 
-/** Safer gas-chip guards */
+/** Utility */
 const hasValue = (v?: bigint | null) => typeof v === "bigint" && v > 0n;
+
+/* ====================== ✨ Video-based Brand Loader ✨ ====================== */
+function BrandLoader({
+  lowEnd,
+  needTap,
+  onTap,
+  label = "Loading NFT...",
+}: {
+  lowEnd: boolean;
+  needTap: boolean;
+  onTap: () => void;
+  label?: string;
+}) {
+  // If low-end + heavy GIF → show static blurred poster with "Tap to load"
+  if (lowEnd && needTap) {
+    return (
+      <div className="relative w-[72%] md:w-[64%] aspect-square grid place-items-center rounded-xl overflow-hidden ring-1 ring-white/10 bg-black/40">
+        <img
+          src={BotPoster}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover opacity-90"
+          draggable={false}
+          loading="eager"
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_40%,rgba(0,0,0,.25),transparent_70%)]" />
+        <div className="absolute bottom-[64px] left-1/2 -translate-x-1/2 text-[12px] text-white/80">
+          Heavy media detected
+        </div>
+        <button
+          type="button"
+          onClick={onTap}
+          className="relative z-10 mb-5 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 bg-black/60 text-white text-[12px] ring-1 ring-white/15 hover:bg-black/75"
+        >
+          Tap to load
+        </button>
+      </div>
+    );
+  }
+
+  // Default: play a tiny looping WEBM teaser with a blurred poster fallback
+  return (
+    <div className="relative w-[72%] md:w-[64%] aspect-square grid place-items-center rounded-xl overflow-hidden ring-1 ring-white/10 bg-black/40">
+      <img
+        src={BotPoster}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover opacity-70"
+        draggable={false}
+        loading="eager"
+      />
+      <video
+        src={BotVideo}
+        poster={BotPoster}
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="metadata"
+        className="relative w-[68%] h-auto rounded-lg shadow-[0_8px_40px_rgba(0,0,0,.35)]"
+      />
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[12px] text-white/80">
+        {label}
+      </div>
+    </div>
+  );
+}
 
 /* ──────────────────────────────────────────────────────────────
    Main
@@ -426,9 +410,7 @@ export default function TierCard({
   tokenDecimals,
   tokenSymbol,
 }: Props) {
-  React.useEffect(() => {
-    ensureOrbitronLink();
-  }, []);
+  React.useEffect(() => { ensureOrbitronLink(); }, []);
 
   const lowEnd = React.useMemo(() => isLowEndDevice(), []);
 
@@ -437,13 +419,8 @@ export default function TierCard({
   const { switchChainAsync } = useSwitchChain();
   const currentChainId = useChainId();
 
-  // ✅ Always use a public client bound to the connected chain
-  // strict to the wallet's chain; avoids reading the wrong network
-  const publicClient = usePublicClient(
-    chain?.id ? ({ chainId: chain.id } as any) : undefined
-  );
+  const publicClient = usePublicClient(chain?.id ? ({ chainId: chain.id } as any) : undefined);
 
-  // Log hook chain bindings when they change
   React.useEffect(() => {
     log("hooks", {
       walletChainId: chain?.id,
@@ -452,15 +429,10 @@ export default function TierCard({
     });
   }, [chain?.id, currentChainId, publicClient]);
 
-  // Payment token env
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
   const envDecimals = Number(YEARN_TOKEN_DECIMALS);
   const payTokenDecimals =
-    typeof tokenDecimals === "number"
-      ? tokenDecimals
-      : Number.isFinite(envDecimals)
-      ? envDecimals
-      : 18;
+    typeof tokenDecimals === "number" ? tokenDecimals : Number.isFinite(envDecimals) ? envDecimals : 18;
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
   const connected = isConnected && !!address;
 
@@ -489,7 +461,7 @@ export default function TierCard({
 
   /* NEW: native gas fee + balance tracking */
   const [nativeBal, setNativeBal] = React.useState<bigint>(0n);
-  const [nativeBalReady, setNativeBalReady] = React.useState(false); // ✅ readiness flag
+  const [nativeBalReady, setNativeBalReady] = React.useState(false);
   const [feeApprove, setFeeApprove] = React.useState<bigint | null>(null);
   const [feeBuy, setFeeBuy] = React.useState<bigint | null>(null);
   const feeSymbol = chain?.nativeCurrency?.symbol || "BNB";
@@ -498,7 +470,7 @@ export default function TierCard({
   const needsToken = !priceIsFree;
   const hasFunds = priceIsFree || tokenBal >= price;
 
-  /** ------------------ Gas helpers (EIP-1559 aware) ------------------ */
+  /** ------------------ Gas helpers ------------------ */
   const perGasRef = React.useRef<bigint>(0n);
   const lastActionRef = React.useRef<"approve" | "buy" | null>(null);
 
@@ -512,7 +484,7 @@ export default function TierCard({
           if (per > 0n) perGasRef.current = per;
           return per;
         } catch {
-          const priority = 2_000_000_000n; // 2 gwei safety
+          const priority = 2_000_000_000n; // 2 gwei
           const per = latest.baseFeePerGas * 2n + priority;
           perGasRef.current = per;
           return per;
@@ -522,20 +494,18 @@ export default function TierCard({
       if (gp > 0n) perGasRef.current = gp;
       return gp;
     } catch {
-      return perGasRef.current || 2_000_000_000n; // fallback 2 gwei
+      return perGasRef.current || 2_000_000_000n;
     }
   }, [publicClient]);
 
-  // Synchronous rough fallbacks (used when estimate is null/zero or inside catch)
   const roughApproveFee = React.useCallback((): bigint => {
-    const per = perGasRef.current || 2_000_000_000n; // 2 gwei
-    // two txs possible (reset + set): ~160k; single approve ~70k
+    const per = perGasRef.current || 2_000_000_000n;
     const gl = 160_000n;
     return per * gl;
   }, []);
   const roughBuyFee = React.useCallback((): bigint => {
     const per = perGasRef.current || 2_000_000_000n;
-    const gl = 220_000n; // generous for buy()
+    const gl = 220_000n;
     return per * gl;
   }, []);
 
@@ -546,132 +516,67 @@ export default function TierCard({
         const gl = await publicClient!.estimateContractGas(opts as any);
         const total = perGas > 0n && gl > 0n ? gl * perGas : 0n;
         return total > 0n ? total : null;
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     },
     [publicClient, getPerGasFee]
   );
 
   const estimateApproveFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
-      if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress))
-        return null;
+      if (!connected || !address || !publicClient || isZeroAddress(payTokenAddress)) return null;
       const need = price;
       let sum = 0n;
 
       const a = (await publicClient.readContract({
-        address: payTokenAddress,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [address, marketAddress],
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance", args: [address, marketAddress],
       })) as bigint;
 
       if (a > 0n && a < need) {
         const f0 = await estimateTxFee({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, 0n],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, 0n],
         } as unknown as EstimateContractGasParameters);
-        sum += f0 ?? roughApproveFee() / 2n; // half of rough for reset
+        sum += f0 ?? roughApproveFee() / 2n;
       }
       if (a < need) {
         const f1 = await estimateTxFee({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, need],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, need],
         } as unknown as EstimateContractGasParameters);
         sum += f1 ?? roughApproveFee();
       }
       return sum > 0n ? sum : roughApproveFee();
-    } catch {
-      return roughApproveFee();
-    }
-  }, [
-    connected,
-    address,
-    publicClient,
-    payTokenAddress,
-    marketAddress,
-    price,
-    estimateTxFee,
-    roughApproveFee,
-  ]);
+    } catch { return roughApproveFee(); }
+  }, [connected, address, publicClient, payTokenAddress, marketAddress, price, estimateTxFee, roughApproveFee]);
 
   const estimateBuyFee = React.useCallback(async (): Promise<bigint | null> => {
     try {
-      if (!connected || !address || !publicClient || isZeroAddress(marketAddress))
-        return null;
+      if (!connected || !address || !publicClient || isZeroAddress(marketAddress)) return null;
       const f = await estimateTxFee({
-        account: address,
-        address: marketAddress,
-        abi: MARKET_ABI,
-        functionName: "buy",
-        args: [BigInt(tier.id), address],
+        account: address, address: marketAddress, abi: MARKET_ABI, functionName: "buy", args: [BigInt(tier.id), address],
       } as unknown as EstimateContractGasParameters);
       return f ?? roughBuyFee();
-    } catch {
-      return roughBuyFee();
-    }
-  }, [
-    connected,
-    address,
-    publicClient,
-    marketAddress,
-    tier.id,
-    estimateTxFee,
-    roughBuyFee,
-  ]);
+    } catch { return roughBuyFee(); }
+  }, [connected, address, publicClient, marketAddress, tier.id, estimateTxFee, roughBuyFee]);
 
   const hasEnoughFor = (needWei?: bigint | null, padBps = 800) => {
-    // If native balance isn't ready, don't block the user with a gas warning yet.
     if (!nativeBalReady) return true;
     if (!needWei || needWei <= 0n) return true;
     const padded = (needWei * BigInt(10000 + padBps)) / 10000n;
-    const ok = nativeBal >= padded;
-    log("gas-check", {
-      op: lastActionRef.current,
-      needWei: needWei?.toString(),
-      paddedWei: padded.toString(),
-      nativeBalWei: nativeBal.toString(),
-      nativeBalReady,
-      chainInfo: {
-        walletChainId: chain?.id,
-        publicClientChainId: (publicClient as any)?.chain?.id,
-        wagmiUseChainId: currentChainId,
-      },
-      ok,
-    });
-    return ok;
+    return nativeBal >= padded;
   };
 
-  // ✅ Optional UX polish: clamp very tiny displayed needs to ≈0.00001
   const gasWarnLine = (needWei?: bigint | null) => {
-    if (!nativeBalReady) {
-      return `Fetching ${feeSymbol} balance… please try again in a moment.`;
-    }
+    if (!nativeBalReady) return `Fetching ${feeSymbol} balance… please try again in a moment.`;
     const have = format5(nativeBal);
     if (!needWei || needWei <= 0n) {
       return `Looks like you might need some ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}. Add a little more and try again.`;
     }
     const needNum = Number(formatUnits(needWei, 18));
-    const needPretty = !isFinite(needNum) || needNum <= 0
-      ? "≈0.00001"
-      : needNum < 1e-5
-      ? "≈0.00001"
-      : needNum.toFixed(5);
+    const needPretty = !isFinite(needNum) || needNum <= 0 ? "≈0.00001" : needNum < 1e-5 ? "≈0.00001" : needNum.toFixed(5);
     return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${needPretty} ${feeSymbol}. Please top up and try again.`;
   };
 
-  /** Metadata */
-  React.useEffect(() => {
-      // not balance-related
-  }, []);
-
+  /** Metadata fetch */
+  React.useEffect(() => {}, []);
   React.useEffect(() => {
     let aborted = false;
     const ctrl = new AbortController();
@@ -683,10 +588,7 @@ export default function TierCard({
         if (!base && publicClient) {
           try {
             base = (await publicClient.readContract({
-              address: passAddress,
-              abi: YEARNPASS1155_ABI,
-              functionName: "uri",
-              args: [BigInt(tier.id)],
+              address: passAddress, abi: YEARNPASS1155_ABI, functionName: "uri", args: [BigInt(tier.id)],
             })) as string;
           } catch {}
         }
@@ -708,18 +610,12 @@ export default function TierCard({
         const http = pick(media);
         setMediaUrl(http);
         const isVid =
-          !!http &&
-          (/\.(mp4|webm|mov|ogv)$/i.test(http) ||
-            (!!data?.animation_url &&
-              !/\.(png|jpe?g|gif|webp|svg)$/i.test(http)));
+          !!http && (/\.(mp4|webm|mov|ogv)$/i.test(http) || (!!data?.animation_url && !/\.(png|jpe?g|gif|webp|svg)$/i.test(http)));
         setIsVideo(isVid);
       } catch {}
     })();
 
-    return () => {
-      ctrl.abort();
-      aborted = true;
-    };
+    return () => { ctrl.abort(); aborted = true; };
   }, [tier.id, tier.uri, passAddress, publicClient]);
 
   /** Ownership / price / WL / allowance */
@@ -730,59 +626,22 @@ export default function TierCard({
       try {
         if (!address) {
           const pPub = (await publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "pricePublic",
-            args: [BigInt(tier.id)],
+            address: marketAddress, abi: MARKET_ABI, functionName: "pricePublic", args: [BigInt(tier.id)],
           })) as bigint;
           if (!stop) {
-            setOwned(false);
-            setIsWl(false);
-            setWlPrice(0n);
-            setPubPrice(pPub);
-            setPrice(pPub);
-            setAllowance(0n);
+            setOwned(false); setIsWl(false); setWlPrice(0n);
+            setPubPrice(pPub); setPrice(pPub); setAllowance(0n);
           }
           return;
         }
 
         const [bal, pYour, wl, pPub, pWl, a] = await Promise.all([
-          publicClient.readContract({
-            address: passAddress,
-            abi: YEARNPASS1155_ABI,
-            functionName: "balanceOf",
-            args: [address, BigInt(tier.id)],
-          }) as Promise<bigint>,
-          publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "priceOf",
-            args: [BigInt(tier.id), address],
-          }) as Promise<bigint>,
-          publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "isWhitelisted",
-            args: [BigInt(tier.id), address],
-          }) as Promise<boolean>,
-          publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "pricePublic",
-            args: [BigInt(tier.id)],
-          }) as Promise<bigint>,
-          publicClient.readContract({
-            address: marketAddress,
-            abi: MARKET_ABI,
-            functionName: "priceWhitelist",
-            args: [BigInt(tier.id)],
-          }) as Promise<bigint>,
-          publicClient.readContract({
-            address: payTokenAddress,
-            abi: ERC20_ABI,
-            functionName: "allowance",
-            args: [address, marketAddress],
-          }) as Promise<bigint>,
+          publicClient.readContract({ address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf", args: [address, BigInt(tier.id)], }) as Promise<bigint>,
+          publicClient.readContract({ address: marketAddress, abi: MARKET_ABI, functionName: "priceOf", args: [BigInt(tier.id), address], }) as Promise<bigint>,
+          publicClient.readContract({ address: marketAddress, abi: MARKET_ABI, functionName: "isWhitelisted", args: [BigInt(tier.id), address], }) as Promise<boolean>,
+          publicClient.readContract({ address: marketAddress, abi: MARKET_ABI, functionName: "pricePublic", args: [BigInt(tier.id)], }) as Promise<bigint>,
+          publicClient.readContract({ address: marketAddress, abi: MARKET_ABI, functionName: "priceWhitelist", args: [BigInt(tier.id)], }) as Promise<bigint>,
+          publicClient.readContract({ address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance", args: [address, marketAddress], }) as Promise<bigint>,
         ]);
 
         log("read-ownership/prices/allowance", {
@@ -806,26 +665,17 @@ export default function TierCard({
         if (!stop) setErr("Unable to fetch price/whitelist right now.");
       }
     })();
-    return () => {
-      stop = true;
-    };
+    return () => { stop = true; };
   }, [address, publicClient, tier.id, passAddress, marketAddress, payTokenAddress, chain?.id, currentChainId]);
 
   /** Reset on disconnect */
   React.useEffect(() => {
     if (status === "disconnected") {
-      setOwned(false);
-      setIsWl(false);
-      setTokenBal(0n);
-      setCelebrate(false);
-      setTxStage("hidden");
-      setErr(null);
-      setShowImportHelp(false);
-      setAllowance(0n);
-      setFeeApprove(null);
-      setFeeBuy(null);
-      setNativeBal(0n);
-      setNativeBalReady(false);
+      setOwned(false); setIsWl(false); setTokenBal(0n);
+      setCelebrate(false); setTxStage("hidden"); setErr(null);
+      setShowImportHelp(false); setAllowance(0n);
+      setFeeApprove(null); setFeeBuy(null);
+      setNativeBal(0n); setNativeBalReady(false);
       log("wallet-disconnected: cleared balances and state");
     }
   }, [status]);
@@ -835,87 +685,51 @@ export default function TierCard({
     let stop = false;
     (async () => {
       try {
-        if (
-          !connected ||
-          !address ||
-          !publicClient ||
-          !needsToken ||
-          isZeroAddress(payTokenAddress)
-        ) {
+        if (!connected || !address || !publicClient || !needsToken || isZeroAddress(payTokenAddress)) {
           if (!stop) setTokenBal(0n);
           return;
         }
         log("read-erc20-balance:start", {
-          address,
-          token: payTokenAddress,
-          walletChainId: chain?.id,
-          publicClientChainId: (publicClient as any)?.chain?.id,
-          wagmiUseChainId: currentChainId,
+          address, token: payTokenAddress,
+          walletChainId: chain?.id, publicClientChainId: (publicClient as any)?.chain?.id, wagmiUseChainId: currentChainId,
         });
         const bal = (await publicClient.readContract({
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [address],
+          address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address],
         })) as bigint;
-        log("read-erc20-balance:done", {
-          token: payTokenAddress,
-          balanceWei: bal?.toString?.(),
-        });
+        log("read-erc20-balance:done", { token: payTokenAddress, balanceWei: bal?.toString?.() });
         if (!stop) setTokenBal(bal);
       } catch (e) {
         log("read-erc20-balance:error", e);
         if (!stop) setTokenBal(0n);
       }
     })();
-    return () => {
-      stop = true;
-    };
+    return () => { stop = true; };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price, chain?.id, currentChainId]);
 
-  /** Native balance watcher (✅ ready-gated & chain-bound) */
+  /** Native balance watcher */
   React.useEffect(() => {
     let stop = false;
     setNativeBalReady(false);
     (async () => {
       if (!connected || !address || !publicClient) {
-        if (!stop) {
-          setNativeBal(0n);
-          setNativeBalReady(false);
-        }
+        if (!stop) { setNativeBal(0n); setNativeBalReady(false); }
         return;
       }
       try {
         log("read-native-balance:start", {
-          address,
-          walletChainId: chain?.id,
-          publicClientChainId: (publicClient as any)?.chain?.id,
-          wagmiUseChainId: currentChainId,
+          address, walletChainId: chain?.id, publicClientChainId: (publicClient as any)?.chain?.id, wagmiUseChainId: currentChainId,
         });
         const bal = await publicClient.getBalance({ address });
-        log("read-native-balance:done", {
-          address,
-          balanceWei: bal?.toString?.(),
-          feeSymbol,
-        });
-        if (!stop) {
-          setNativeBal(bal);
-          setNativeBalReady(true);
-        }
+        log("read-native-balance:done", { address, balanceWei: bal?.toString?.(), feeSymbol });
+        if (!stop) { setNativeBal(bal); setNativeBalReady(true); }
       } catch (e) {
         log("read-native-balance:error", e, {
-          walletChainId: chain?.id,
-          publicClientChainId: (publicClient as any)?.chain?.id,
+          walletChainId: chain?.id, publicClientChainId: (publicClient as any)?.chain?.id,
         });
-        if (!stop) {
-          setNativeBal(0n);
-          setNativeBalReady(true);
-        }
+        if (!stop) { setNativeBal(0n); setNativeBalReady(true); }
       }
     })();
-    return () => {
-      stop = true;
-    };
+    return () => { stop = true; };
   }, [connected, address, publicClient, chain?.id, currentChainId, feeSymbol]);
 
   /** Live fee estimates */
@@ -923,46 +737,22 @@ export default function TierCard({
     let stop = false;
     (async () => {
       if (!connected || !address || !publicClient) {
-        if (!stop) {
-          setFeeApprove(null);
-          setFeeBuy(null);
-        }
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
         return;
       }
       try {
         log("estimate-fees:start", {
-          walletChainId: chain?.id,
-          publicClientChainId: (publicClient as any)?.chain?.id,
-          wagmiUseChainId: currentChainId,
+          walletChainId: chain?.id, publicClientChainId: (publicClient as any)?.chain?.id, wagmiUseChainId: currentChainId,
         });
         const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
-        log("estimate-fees:done", {
-          approveWei: fa?.toString?.(),
-          buyWei: fb?.toString?.(),
-        });
-        if (!stop) {
-          setFeeApprove(fa);
-          setFeeBuy(fb);
-        }
+        log("estimate-fees:done", { approveWei: fa?.toString?.(), buyWei: fb?.toString?.() });
+        if (!stop) { setFeeApprove(fa); setFeeBuy(fb); }
       } catch (e) {
         log("estimate-fees:error", e);
-        if (!stop) {
-          setFeeApprove(null);
-          setFeeBuy(null);
-        }
+        if (!stop) { setFeeApprove(null); setFeeBuy(null); }
       }
     })();
-  }, [
-    connected,
-    address,
-    publicClient,
-    estimateApproveFee,
-    estimateBuyFee,
-    allowance,
-    price,
-    chain?.id,
-    currentChainId,
-  ]);
+  }, [connected, address, publicClient, estimateApproveFee, estimateBuyFee, allowance, price, chain?.id, currentChainId]);
 
   /** Filter */
   React.useEffect(() => {
@@ -974,114 +764,51 @@ export default function TierCard({
       if (detail === "mine" || detail === "all") apply(detail);
     };
     window.addEventListener(FILTER_EVENT, onFilter as EventListener);
-    return () =>
-      window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
+    return () => window.removeEventListener(FILTER_EVENT, onFilter as EventListener);
   }, [owned]);
 
   /* -------- approve/buy with gas pre-checks + friendly errors -------- */
   const rewriteGasError = (raw?: string | null) => {
-    if (!raw) return null;
-
-    // ⛑️ Don’t convert into a gas warning until we know the real native balance.
-    if (!nativeBalReady) return null;
-
+    if (!raw || !nativeBalReady) return null;
     const s = String(raw);
-    const match =
-      /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(
-        s
-      );
+    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(s);
     if (match) {
       const op = lastActionRef.current;
-      const need =
-        op === "buy" ? feeBuy ?? roughBuyFee() : feeApprove ?? roughApproveFee();
-      log("rewrite-gas-error", {
-        op,
-        nativeBalReady,
-        nativeBalWei: nativeBal.toString(),
-        needWei: need?.toString?.(),
-        walletChainId: chain?.id,
-        publicClientChainId: (publicClient as any)?.chain?.id,
-        wagmiUseChainId: currentChainId,
-      });
+      const need = op === "buy" ? feeBuy ?? roughBuyFee() : feeApprove ?? roughApproveFee();
       return gasWarnLine(need);
     }
     return null;
   };
 
-  /** Approve (exact), estimate + preflight */
   const doApprove = React.useCallback(async () => {
     setErr(null);
     lastActionRef.current = "approve";
+    if (!connected || !address) { try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); } return; }
+    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
+    if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
 
-    if (!connected || !address) {
-      try {
-        appKit?.open?.();
-      } catch {
-        setErr("Connect your wallet first.");
-      }
-      return;
-    }
-    if (!walletClient || !publicClient) {
-      setErr("Wallet or RPC is not ready.");
-      return;
-    }
-    if (isZeroAddress(payTokenAddress)) {
-      setErr("Payment token address is not set.");
-      return;
-    }
-
-    // Pre-flight gas check (use rough if estimate missing)
     try {
       const est = (await estimateApproveFee()) ?? roughApproveFee();
-      log("preflight-approve", {
-        estWei: est?.toString?.(),
-        nativeBalWei: nativeBal.toString(),
-        nativeBalReady,
-      });
-      if (est > 0n && !hasEnoughFor(est)) {
-        setErr(gasWarnLine(est));
-        return;
-      }
+      if (est > 0n && !hasEnoughFor(est)) { setErr(gasWarnLine(est)); return; }
     } catch {
       const rough = roughApproveFee();
-      log("preflight-approve:rough", {
-        roughWei: rough?.toString?.(),
-        nativeBalWei: nativeBal.toString(),
-        nativeBalReady,
-      });
-      if (!hasEnoughFor(rough)) {
-        setErr(gasWarnLine(rough));
-        return;
-      }
+      if (!hasEnoughFor(rough)) { setErr(gasWarnLine(rough)); return; }
     }
 
     setBusy(true);
     setTxStage("waiting");
     try {
       const required = price;
-
-      // current allowance
       let a = (await publicClient.readContract({
-        address: payTokenAddress,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [address, marketAddress],
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance", args: [address, marketAddress],
       })) as bigint;
 
       if (a > 0n && a < required) {
         const gas0 = await publicClient.estimateContractGas({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, 0n],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, 0n],
         });
         const { request } = await publicClient.simulateContract({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, 0n],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, 0n],
         });
         const h0 = await walletClient.writeContract({ ...request, gas: gas0 });
         await publicClient.waitForTransactionReceipt({ hash: h0 });
@@ -1090,28 +817,17 @@ export default function TierCard({
 
       if (a < required) {
         const gas = await publicClient.estimateContractGas({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, required],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, required],
         });
         const { request } = await publicClient.simulateContract({
-          account: address,
-          address: payTokenAddress,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [marketAddress, required],
+          account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, required],
         });
         const hash = await walletClient.writeContract({ ...request, gas });
         await publicClient.waitForTransactionReceipt({ hash });
       }
 
       const aNew = (await publicClient.readContract({
-        address: payTokenAddress,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [address, marketAddress],
+        address: payTokenAddress, abi: ERC20_ABI, functionName: "allowance", args: [address, marketAddress],
       })) as bigint;
 
       setAllowance(aNew);
@@ -1120,165 +836,80 @@ export default function TierCard({
       const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
       setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
       setTxStage("hidden");
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    connected,
-    address,
-    walletClient,
-    publicClient,
-    payTokenAddress,
-    marketAddress,
-    price,
-    estimateApproveFee,
-    roughApproveFee,
-    nativeBal,
-    nativeBalReady,
-  ]);
+    } finally { setBusy(false); }
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee, nativeBalReady, feeApprove]);
 
-  /** Buy with preflight + chain switch (estimate after switch) */
   const doBuy = React.useCallback(async () => {
     setErr(null);
     lastActionRef.current = "buy";
 
-    if (!connected || !address) {
-      try {
-        appKit?.open?.();
-      } catch {
-        setErr("Connect your wallet first.");
-      }
-      return;
-    }
-    if (!walletClient || !publicClient) {
-      setErr("Wallet or RPC is not ready.");
-      return;
-    }
+    if (!connected || !address) { try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); } return; }
+    if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (owned) return;
-    if (isZeroAddress(marketAddress)) {
-      setErr("Market address is not set.");
-      return;
-    }
-    if (isZeroAddress(passAddress)) {
-      setErr("Pass address is not set.");
-      return;
-    }
+    if (isZeroAddress(marketAddress)) { setErr("Market address is not set."); return; }
+    if (isZeroAddress(passAddress)) { setErr("Pass address is not set."); return; }
 
     setBusy(true);
     setTxStage("waiting");
     try {
-      // Ensure wallet is on the same chain as publicClient
       const targetChainId = (publicClient as any)?.chain?.id ?? chain?.id ?? currentChainId;
       if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
-        try {
-          await switchChainAsync({ chainId: targetChainId });
-        } catch {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr("Please switch to the correct network.");
-          return;
-        }
+        try { await switchChainAsync({ chainId: targetChainId }); }
+        catch { setBusy(false); setTxStage("hidden"); setErr("Please switch to the correct network."); return; }
       }
 
-      // Re-read price and balances right before sending
       const currentPrice = (await publicClient.readContract({
-        address: marketAddress,
-        abi: MARKET_ABI,
-        functionName: address ? "priceOf" : "pricePublic",
+        address: marketAddress, abi: MARKET_ABI, functionName: address ? "priceOf" : "pricePublic",
         args: address ? [BigInt(tier.id), address] : [BigInt(tier.id)],
       })) as bigint;
       setPrice(currentPrice);
 
       if (needsToken && tokenBal < currentPrice) {
-        setBusy(false);
-        setTxStage("hidden");
+        setBusy(false); setTxStage("hidden");
         setErr(`Insufficient ${payTokenSymbol} balance to buy this NFT.`);
         return;
       }
 
-      // Preflight: use estimate; if missing, use rough hint
       try {
         const est = (await estimateBuyFee()) ?? roughBuyFee();
-        log("preflight-buy", {
-          estWei: est?.toString?.(),
-          nativeBalWei: nativeBal.toString(),
-          nativeBalReady,
-        });
         if (est > 0n && !hasEnoughFor(est)) {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr(gasWarnLine(est));
-          return;
+          setBusy(false); setTxStage("hidden"); setErr(gasWarnLine(est)); return;
         }
       } catch {
         const rough = roughBuyFee();
-        log("preflight-buy:rough", {
-          roughWei: rough?.toString?.(),
-          nativeBalWei: nativeBal.toString(),
-          nativeBalReady,
-        });
         if (!hasEnoughFor(rough)) {
-          setBusy(false);
-          setTxStage("hidden");
-          setErr(gasWarnLine(rough));
-          return;
+          setBusy(false); setTxStage("hidden"); setErr(gasWarnLine(rough)); return;
         }
       }
 
       const gas = await publicClient.estimateContractGas({
-        account: address,
-        address: marketAddress,
-        abi: MARKET_ABI,
-        functionName: "buy",
-        args: [BigInt(tier.id), address],
+        account: address, address: marketAddress, abi: MARKET_ABI, functionName: "buy", args: [BigInt(tier.id), address],
       });
       const { request } = await publicClient.simulateContract({
-        account: address,
-        address: marketAddress,
-        abi: MARKET_ABI,
-        functionName: "buy",
-        args: [BigInt(tier.id), address],
+        account: address, address: marketAddress, abi: MARKET_ABI, functionName: "buy", args: [BigInt(tier.id), address],
       });
 
-      // ✅ Soft, non-rejecting wallet hint instead of Promise.race watchdog
+      // soft wallet hint
       let walletHintTimer: ReturnType<typeof setTimeout> | null = null;
       walletHintTimer = setTimeout(() => {
-        log("wallet-hint: waiting for user to confirm in wallet…");
         setTxStage("waiting");
-        setErr(
-          "Still waiting for wallet confirmation… If your wallet is open, please approve the transaction."
-        );
+        setErr("Still waiting for wallet confirmation… If your wallet is open, please approve the transaction.");
       }, 15000);
 
       let buyHash: `0x${string}`;
       try {
         buyHash = await walletClient.writeContract({ ...request, gas });
-        log("buy:hash", { buyHash });
       } finally {
-        if (walletHintTimer) {
-          clearTimeout(walletHintTimer);
-          walletHintTimer = null;
-        }
-        setErr(null); // clear the hint once we have a hash
+        if (walletHintTimer) clearTimeout(walletHintTimer);
+        setErr(null);
       }
 
       setTxStage("confirming");
-
-      const receipt = await publicClient.waitForTransactionReceipt({
-        hash: buyHash,
-      });
-      log("buy:receipt", {
-        status: receipt.status,
-        blockNumber: receipt.blockNumber?.toString?.(),
-        chainId: (publicClient as any)?.chain?.id,
-      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
       if (receipt.status !== "success") throw new Error("Transaction reverted.");
 
       const bal = (await publicClient.readContract({
-        address: passAddress,
-        abi: YEARNPASS1155_ABI,
-        functionName: "balanceOf",
-        args: [address, BigInt(tier.id)],
+        address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf", args: [address, BigInt(tier.id)],
       })) as bigint;
 
       const nowOwned = bal > 0n;
@@ -1287,23 +918,16 @@ export default function TierCard({
       if (needsToken) {
         try {
           const newBal = (await publicClient.readContract({
-            address: payTokenAddress,
-            abi: ERC20_ABI,
-            functionName: "balanceOf",
-            args: [address],
+            address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address],
           })) as bigint;
           setTokenBal(newBal);
         } catch {}
       }
 
       if (nowOwned) {
-        setTxStage("success");
-        setCelebrate(true);
+        setTxStage("success"); setCelebrate(true);
         if (isMobile()) setShowImportHelp(true);
-        setTimeout(() => {
-          setTxStage("hidden");
-          setCelebrate(false);
-        }, 1800);
+        setTimeout(() => { setTxStage("hidden"); setCelebrate(false); }, 1800);
       } else {
         setTxStage("hidden");
       }
@@ -1312,40 +936,14 @@ export default function TierCard({
       const nice = rewriteGasError(raw);
       setErr(nice || raw || "Transaction failed.");
       setTxStage("hidden");
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    connected,
-    address,
-    walletClient,
-    publicClient,
-    owned,
-    marketAddress,
-    passAddress,
-    chain?.id,
-    currentChainId,
-    switchChainAsync,
-    tier.id,
-    needsToken,
-    tokenBal,
-    payTokenSymbol,
-    estimateBuyFee,
-    roughBuyFee,
-    nativeBal,
-    nativeBalReady,
-  ]);
+    } finally { setBusy(false); }
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee, nativeBalReady, feeBuy]);
 
   // Labels
-  const yourPriceLabel = priceIsFree
-    ? "Free"
-    : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
+  const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
   const pubPriceLabel = `${formatUnits(pubPrice, payTokenDecimals)} ${payTokenSymbol}`;
   const wlPriceLabel = `${formatUnits(wlPrice, payTokenDecimals)} ${payTokenSymbol}`;
-  const youSave =
-    pubPrice > price
-      ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}`
-      : null;
+  const youSave = pubPrice > price ? `${formatUnits(pubPrice - price, payTokenDecimals)} ${payTokenSymbol}` : null;
 
   // Tilt + glare
   const { x, y, rotateX, rotateY, onMove } = useTilt3D();
@@ -1354,31 +952,76 @@ export default function TierCard({
   const glare = useMotionTemplate`radial-gradient(420px circle at ${xPct}% ${yPct}%, rgba(255,255,255,.12), transparent 45%)`;
 
   const checksumPass = React.useMemo(() => {
-    try {
-      return getAddress(passAddress);
-    } catch {
-      return passAddress;
-    }
+    try { return getAddress(passAddress); } catch { return passAddress; }
   }, [passAddress]);
 
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
-  // Gas chip only when we have a real estimate — and after balance is ready
   const haveFeeApprove = hasValue(feeApprove);
   const haveFeeBuy = hasValue(feeBuy);
   const showGasChip =
-    !owned &&
-    connected &&
-    nativeBalReady &&
+    !owned && connected && nativeBalReady &&
     ((allowance < price && haveFeeApprove && !hasEnoughFor(feeApprove)) ||
       (haveFeeBuy && !hasEnoughFor(feeBuy)));
 
   const optimizedSet = React.useMemo(() => buildSrcSet(mediaUrl), [mediaUrl]);
 
+  /* ────────────────── Deferred media loader (GIF-safe) ────────────────── */
+  const mediaHostRef = React.useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = React.useState(false);
+  const [isScrolling, setIsScrolling] = React.useState(false);
+  const [showMedia, setShowMedia] = React.useState(false);
+  const [mediaLoaded, setMediaLoaded] = React.useState(false);
+  const [userTappedToLoad, setUserTappedToLoad] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!mediaHostRef.current || typeof IntersectionObserver === "undefined") {
+      setInView(true); return;
+    }
+    const el = mediaHostRef.current;
+    const io = new IntersectionObserver(
+      (entries) => { const e = entries[0]; setInView(e?.isIntersecting ?? false); },
+      { rootMargin: "200px 0px", threshold: 0.01 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  React.useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      setIsScrolling(true);
+      if (t) clearTimeout(t);
+      t = setTimeout(() => setIsScrolling(false), 120);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); if (t) clearTimeout(t); };
+  }, []);
+
+  const isHeavyGif = React.useMemo(() => !!mediaUrl && isGif(mediaUrl), [mediaUrl]);
+
+  React.useEffect(() => {
+    const ready = inView && !isScrolling && (!lowEnd || (lowEnd && userTappedToLoad));
+    if (ready && !showMedia) {
+      const id = (window as any).requestIdleCallback
+        ? (window as any).requestIdleCallback(() => setShowMedia(true))
+        : setTimeout(() => setShowMedia(true), 80) as any;
+      return () => { if (typeof id === "number") clearTimeout(id as number); };
+    }
+  }, [inView, isScrolling, lowEnd, userTappedToLoad, showMedia]);
+
+  React.useEffect(() => {
+    setShowMedia(false);
+    setMediaLoaded(false);
+    setUserTappedToLoad(false);
+  }, [mediaUrl]);
+
+  /* ───────────────────────────────────────────────────────────── */
+
   return visible ? (
     <motion.div
-      layout="position" // ← add this
+      layout="position"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
@@ -1393,6 +1036,7 @@ export default function TierCard({
 
             {/* MEDIA */}
             <motion.div
+              ref={mediaHostRef}
               layout
               className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#0b0f17] ring-1 ring-white/8 shadow-glass"
               style={{ transform: "translateZ(30px)", contain: "content" }}
@@ -1415,8 +1059,20 @@ export default function TierCard({
               <div className="pointer-events-none absolute inset-0 z-10 [content-visibility:auto] [contain-intrinsic-size:320px_240px]">
                 {!lowEnd && <MetaverseScene />}
 
+                {/* ───────────── Deferred media region ───────────── */}
                 <div className="absolute inset-0 grid place-items-center">
-                  {mediaUrl ? (
+                  {/* Video-based loader while waiting/decoding */}
+                  {(!showMedia || !mediaLoaded) && (
+                    <BrandLoader
+                      lowEnd={lowEnd}
+                      needTap={lowEnd && isHeavyGif && !userTappedToLoad}
+                      onTap={() => setUserTappedToLoad(true)}
+                      label={inView ? "Loading NFT…" : "Waiting to appear…"}
+                    />
+                  )}
+
+                  {/* Actual media (mounts only when should show) */}
+                  {showMedia && mediaUrl ? (
                     isVideo ? (
                       <motion.video
                         key={mediaUrl}
@@ -1428,37 +1084,34 @@ export default function TierCard({
                         preload="metadata"
                         disablePictureInPicture
                         controls={false}
-                        className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95] rounded-lg"
-                        initial={{ scale: 0.98, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
+                        onLoadedData={() => setMediaLoaded(true)}
+                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none rounded-lg ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
+                        initial={{ scale: 0.985 }}
+                        animate={{ scale: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
                     ) : (
                       <motion.img
-                        key={optimizedSet.src || mediaUrl}
-                        src={optimizedSet.src}
-                        srcSet={optimizedSet.srcSet}
-                        sizes={optimizedSet.sizes}
+                        key={mediaUrl}
+                        src={isGif(mediaUrl) ? mediaUrl : optimizedSet.src}
+                        srcSet={isGif(mediaUrl) ? undefined : optimizedSet.srcSet}
+                        sizes={isGif(mediaUrl) ? undefined : optimizedSet.sizes}
                         alt={name}
                         loading="lazy"
                         decoding="async"
                         {...({ fetchpriority: "low" } as any)}
                         draggable={false}
-                        className="w-[78%] md:w-[70%] h-auto object-contain select-none opacity-[0.95]"
-                        initial={{ scale: 0.98, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
+                        onLoad={() => setMediaLoaded(true)}
+                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
+                        initial={{ scale: 0.985 }}
+                        animate={{ scale: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
                     )
-                  ) : (
-                    <motion.div
-                      className="w-[70%] aspect-square rounded-xl bg-white/[0.06] ring-1 ring-white/10"
-                      initial={{ opacity: 0.4 }}
-                      animate={{ opacity: 0.6 }}
-                      transition={{ repeat: Infinity, duration: 1.4, repeatType: "reverse" }}
-                    />
-                  )}
+                  ) : null}
                 </div>
+                {/* ───────────── /Deferred media region ───────────── */}
+
                 <OrbitRings />
                 <motion.div aria-hidden className="absolute inset-0" style={{ backgroundImage: glare }} />
                 <div className="absolute inset-0 bg-[radial-gradient(80%_70%_at_50%_120%,rgba(0,0,0,.55),transparent)]" />
@@ -1474,12 +1127,7 @@ export default function TierCard({
             {/* CONTENT */}
             <div className="p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3
-                  className="text-white/90 font-semibold truncate tracking-wide font-orbitron"
-                  title={name}
-                >
-                  {name}
-                </h3>
+                <h3 className="text-white/90 font-semibold truncate tracking-wide font-orbitron" title={name}>{name}</h3>
                 <div className="flex items-center gap-2">
                   {connected && isWl && !owned && (
                     <motion.span
@@ -1503,7 +1151,7 @@ export default function TierCard({
                 </div>
               </div>
 
-              {/* Price row (still useful even when owned, to show original price) */}
+              {/* Price row */}
               <div className="mt-2 flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <div className="absolute inset-0 blur-md bg-gradient-to-r from-indigo-400/20 to-cyan-300/20 rounded-full" />
@@ -1517,21 +1165,10 @@ export default function TierCard({
 
                 {connected && isWl && (
                   <>
-                    <span
-                      className={`text-[11px] md:text-xs ${
-                        pubPrice > price
-                          ? "line-through decoration-red-400/70 decoration-2 text-white/60"
-                          : "text-white/60"
-                      }`}
-                      title={`Public price: ${pubPriceLabel}`}
-                    >
+                    <span className={`text-[11px] md:text-xs ${pubPrice > price ? "line-through decoration-red-400/70 decoration-2 text-white/60" : "text-white/60"}`} title={`Public price: ${pubPriceLabel}`}>
                       Public: {pubPriceLabel}
                     </span>
-
-                    <span
-                      className="text-[11px] md:text-xs text-indigo-200/90"
-                      title={`Whitelist price: ${wlPriceLabel}`}
-                    >
+                    <span className="text-[11px] md:text-xs text-indigo-200/90" title={`Whitelist price: ${wlPriceLabel}`}>
                       WL: {wlPriceLabel}
                     </span>
                   </>
@@ -1549,7 +1186,7 @@ export default function TierCard({
                 )}
               </div>
 
-              {/* Balances + gas warnings (hidden when owned) */}
+              {/* Balances + gas warnings */}
               {!owned && connected && needsToken && (
                 <div className="mt-1 text-[11px] md:text-xs text-white/60">
                   Balance: {format3(tokenBal, payTokenDecimals)} {payTokenSymbol}
@@ -1568,26 +1205,21 @@ export default function TierCard({
                 </div>
               )}
 
-              {/* ACTIONS — hidden entirely when owned */}
+              {/* Actions */}
               {!owned && (
                 <>
-                  {/* Not connected: only show Connect Wallet */}
                   {!connected ? (
                     <motion.button
                       onClick={openConnect}
                       whileTap={{ scale: 0.985 }}
                       className="group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                     >
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
-                      />
+                      <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
                       <span className="relative flex items-center gap-2">
                         <Wallet2 className="w-4 h-4" /> Connect Wallet
                       </span>
                     </motion.button>
                   ) : (
-                    // Connected: normal approve/buy flow
                     <>
                       {needsToken && allowance < price ? (
                         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1595,25 +1227,11 @@ export default function TierCard({
                             onClick={doApprove}
                             disabled={busy}
                             className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 font-orbitron"
-                            title={
-                              haveFeeApprove && !hasEnoughFor(feeApprove)
-                                ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas`
-                                : undefined
-                            }
+                            title={haveFeeApprove && !hasEnoughFor(feeApprove) ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas` : undefined}
                           >
-                            {busy ? (
-                              <span className="inline-flex items-center gap-2">
-                                <Loader2 className="w-4 h-4 animate-spin" /> Approving…
-                              </span>
-                            ) : (
-                              "Approve"
-                            )}
+                            {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Approving…</span> : "Approve"}
                           </button>
-                          <button
-                            disabled
-                            className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron"
-                            title="Approve first"
-                          >
+                          <button disabled className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
                             Buy
                           </button>
                         </div>
@@ -1627,16 +1245,9 @@ export default function TierCard({
                               ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
                               : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                           }`}
-                          title={
-                            haveFeeBuy && !hasEnoughFor(feeBuy)
-                              ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas`
-                              : undefined
-                          }
+                          title={haveFeeBuy && !hasEnoughFor(feeBuy) ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas` : undefined}
                         >
-                          <span
-                            aria-hidden
-                            className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80"
-                          />
+                          <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
                           <span className="relative flex items-center gap-2">
                             {busy ? (
                               <>
@@ -1679,15 +1290,8 @@ export default function TierCard({
 
               <AnimatePresence>
                 {celebrate && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    className="mt-3 text-center text-emerald-200/85 text-sm"
-                  >
-                    <div className="flex items-center justify-center gap-2">
-                      ✅ Added to your vault <Sparkles />
-                    </div>
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="mt-3 text-center text-emerald-200/85 text-sm">
+                    <div className="flex items-center justify-center gap-2">✅ Added to your vault <Sparkles /></div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
                       You can see your NFT in your wallet <ExternalLink className="w-3.5 h-3.5 opacity-80" />
                     </div>
@@ -1703,56 +1307,26 @@ export default function TierCard({
                     className="w-full inline-flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] bg-black/35 ring-1 ring-white/10 hover:bg-black/45"
                   >
                     <span className="text-white/85">
-                      {owned
-                        ? "How to add this NFT to MetaMask"
-                        : "Don’t see your NFT in MetaMask Mobile? Import it manually"}
+                      {owned ? "How to add this NFT to MetaMask" : "Don’t see your NFT in MetaMask Mobile? Import it manually"}
                     </span>
-                    <ChevronDown
-                      className={`w-4 h-4 transition ${showImportHelp ? "rotate-180" : "rotate-0"}`}
-                    />
+                    <ChevronDown className={`w-4 h-4 transition ${showImportHelp ? "rotate-180" : "rotate-0"}`} />
                   </button>
 
                   <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
                     <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
-                      <p className="leading-relaxed">
-                        MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. Import it manually:
-                      </p>
+                      <p className="leading-relaxed">MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. Import it manually:</p>
                       <ol className="list-decimal list-inside space-y-1">
-                        <li>
-                          Open <strong>MetaMask</strong> ➜ <strong>NFTs</strong> tab.
-                        </li>
+                        <li>Open <strong>MetaMask</strong> ➜ <strong>NFTs</strong> tab.</li>
                         <li>Tap <strong>Import NFTs</strong>.</li>
-                        <li>
-                          Paste the <em>Contract Address</em> and <em>Token ID</em>.
-                        </li>
+                        <li>Select <strong> BNB Smart Chain </strong> Network.</li>
+                        <li>Paste the <em>Contract Address</em> and <em>Token ID</em>.</li>
                       </ol>
 
                       <div className="mt-2 space-y-2">
-                        <CopyField
-                          label="Contract"
-                          value={checksumPass}
-                          display={shortenMid(checksumPass, 12, 8)}
-                          mono
-                          color="cyan"
-                        />
-                        <CopyField
-                          label="Token ID (decimal)"
-                          value={tokenIdDec}
-                          mono
-                          color="indigo"
-                        />
-                        <CopyField
-                          label="Token ID (hex)"
-                          value={tokenIdHex}
-                          display={shortenMid(tokenIdHex, 14, 12)}
-                          mono
-                          color="violet"
-                        />
-                        {isMetaMaskUA() && isMobile() && (
-                          <p className="pt-1 opacity-75">
-                            Tip: Pull down to refresh if it doesn’t appear immediately.
-                          </p>
-                        )}
+                        <CopyField label="Contract" value={checksumPass} display={shortenMid(checksumPass, 12, 8)} mono color="cyan" />
+                        <CopyField label="Token ID (decimal)" value={tokenIdDec} mono color="indigo" />
+                        <CopyField label="Token ID (hex)" value={tokenIdHex} display={shortenMid(tokenIdHex, 14, 12)} mono color="violet" />
+                        {isMetaMaskUA() && isMobile() && <p className="pt-1 opacity-75">Tip: Pull down to refresh if it doesn’t appear immediately.</p>}
                       </div>
                     </div>
                   </div>
@@ -1769,7 +1343,7 @@ export default function TierCard({
         .font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
         .acc { overflow:hidden; transition:max-height .24s ease, opacity .24s ease; will-change:max-height, opacity; }
         .acc-closed { max-height:0; opacity:0; }
-        .acc-open { max-height:420px; opacity:1; } /* large enough for the help content */
+        .acc-open { max-height:420px; opacity:1; }
       `}</style>
     </motion.div>
   ) : null;
@@ -1779,12 +1353,7 @@ export default function TierCard({
 function CornerRibbon({ show }: { show: boolean }) {
   if (!show) return null;
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 180, damping: 18 }}
-      className="absolute top-2 left-2 z-30"
-    >
+    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 180, damping: 18 }} className="absolute top-2 left-2 z-30">
       <div
         className="px-3 py-1 text-[10px] md:text-[11px] font-semibold uppercase tracking-wider text-white bg-[linear-gradient(135deg,#6366f1_0%,#06b6d4_100%)] ring-1 ring-white/10 shadow rounded-sm"
         style={{ clipPath: "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0% 100%)" }}

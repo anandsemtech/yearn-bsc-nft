@@ -1,18 +1,18 @@
 // src/lib/appkit.ts
 import { createAppKit } from "@reown/appkit";
 import { bsc } from "@reown/appkit/networks";
-import { networks as baseNetworks, wagmiAdapter } from "./reown";
+import { wagmiAdapter, networks as reownNetworks } from "./reown";
 
 // Derive the network type from the concrete `bsc` export
-type NetworkType = typeof bsc;
+type Network = typeof bsc;
 
-// Make sure `networks` is a non-empty tuple as AppKit expects
-const networks = baseNetworks as [NetworkType, ...NetworkType[]];
+// ✅ AppKit expects a non-empty tuple; re-cast the mutable array to a tuple type
+const networks = reownNetworks as [Network, ...Network[]];
 
 // Project ID (WalletConnect / AppKit)
 const projectId = import.meta.env.VITE_REOWN_PROJECT_ID as string;
 if (!projectId) {
-  // Prefer warn over hard-throw to not crash dev by default
+  // Keep dev server running if env is missing
   // eslint-disable-next-line no-console
   console.warn("[appkit] VITE_REOWN_PROJECT_ID is missing");
 }
@@ -24,8 +24,9 @@ const url =
 
 export const appKit = createAppKit({
   adapters: [wagmiAdapter],
-  networks,            // tuple-typed via NetworkType above
-  defaultNetwork: bsc, // same type as NetworkType
+  networks,                     // ✅ correct tuple type
+  defaultNetwork: networks[0],  // ✅ same type as `Network`
+  allowUnsupportedChain: false,
   projectId,
   themeMode: "dark",
   features: { analytics: true },

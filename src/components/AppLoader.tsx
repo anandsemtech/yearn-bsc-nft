@@ -1,13 +1,14 @@
 import React from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { Cpu } from "lucide-react";
 import Logo from "../assets/logo.svg";
 
+/* Video assets */
+import BotVideo from "../assets/BotVideoAnimation.webm";
+import BotPoster from "../assets/BotVideoPosterBlur.jpg";
+
 /**
- * AppLoader — Metaverse Core (wow center) + Low-poly Universe
- * - Center: holo eye rings + radial ticks + hexgrid + scanlines + NFT diamond + orbiting nodes + particle swirl
- * - Surroundings: low-poly terrain, planets, astronaut, rocket, starfield
- * - Pure CSS/SVG animations (transform/opacity only). Mobile-safe, jank-free.
+ * AppLoader — Logo + Caption + Video + Tags + Linear Progress
  */
 
 type Props = {
@@ -17,11 +18,36 @@ type Props = {
   version?: string;
 };
 
-const RING_SIZE = 164;
-const RING_STROKE = 7;
+const isLowEndDevice = () => {
+  try {
+    const mem = (navigator as any).deviceMemory || 0;
+    const cores = navigator.hardwareConcurrency || 0;
+    const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    return uaMobile && ((mem && mem <= 4) || (cores && cores <= 4));
+  } catch {
+    return false;
+  }
+};
+
+const usePrefersReducedMotion = () => {
+  const [reduced, setReduced] = React.useState(false);
+  React.useEffect(() => {
+    const q = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(q.matches);
+    const fn = (e: MediaQueryListEvent) => setReduced(e.matches);
+    q.addEventListener?.("change", fn);
+    return () => q.removeEventListener?.("change", fn);
+  }, []);
+  return reduced;
+};
 
 export default function AppLoader({ show, onDone, durationMs = 2600, version }: Props) {
   const [progress, setProgress] = React.useState(0);
+  const reducedMotion = usePrefersReducedMotion();
+  const lowEnd = React.useMemo(() => isLowEndDevice(), []);
+  const [canAutoplay, setCanAutoplay] = React.useState(false);
+  const [userTapped, setUserTapped] = React.useState(false);
+  const [inView, setInView] = React.useState(false);
 
   const resolvedVersion =
     version ??
@@ -29,7 +55,32 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
     (typeof process !== "undefined" && (process as any).env?.REACT_APP_VERSION) ??
     "v0.0.0";
 
-  // progress timeline
+  // Mount guard for video (only when visible)
+  const hostRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (!hostRef.current || typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(([e]) => setInView(!!e?.isIntersecting), {
+      rootMargin: "200px 0px",
+      threshold: 0.01,
+    });
+    io.observe(hostRef.current);
+    return () => io.disconnect();
+  }, []);
+
+  // Decide if video should autoplay
+  React.useEffect(() => {
+    if (!show) return;
+    if (reducedMotion || (lowEnd && !userTapped)) {
+      setCanAutoplay(false);
+      return;
+    }
+    setCanAutoplay(true);
+  }, [show, reducedMotion, lowEnd, userTapped]);
+
+  // Progress timeline
   React.useEffect(() => {
     if (!show) return;
     setProgress(0);
@@ -46,76 +97,97 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
     return () => cancelAnimationFrame(raf);
   }, [show, durationMs, onDone]);
 
-  // lock scroll
+  // Lock scroll while loader shown
   React.useEffect(() => {
     if (!show) return;
     const prev = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
-    return () => { document.documentElement.style.overflow = prev; };
+    return () => {
+      document.documentElement.style.overflow = prev;
+    };
   }, [show]);
 
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
+        <div
           key="app-loader"
           className="fixed inset-0 z-[9999] text-white"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }}
           aria-live="polite"
           aria-busy={true}
           role="alert"
+          ref={hostRef}
         >
-          {/* Deep space + stars */}
+          {/* Background */}
           <div className="absolute inset-0 bg-[#070a11]" />
-          <Starfield count={120} />
+          {!reducedMotion && <Starfield count={120} />}
 
           {/* Low-poly universe */}
-          <LowPolyGround />
-          <LowPolyPlanets />
-          <Astronaut />
-          <Rocket />
+          {!reducedMotion && (
+            <>
+              <LowPolyGround />
+              <LowPolyPlanets />
+              <Astronaut />
+              <Rocket />
+            </>
+          )}
 
-          {/* Center stack */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="relative">
-              {/* WOW CENTER: MetaverseCore sits *behind* the functional ring */}
-              <MetaverseCore size={RING_SIZE + 72} />
+          {/* ── Layout column ───────────────────────────────────────────── */}
+          <div className="absolute inset-0 flex flex-col items-center">
+            {/* Top header: Logo + Caption */}
+            <div className="w-full pt-6 md:pt-8 px-4 flex flex-col items-center gap-3 text-center">
+              <img
+                src={Logo}
+                alt="YearnTogether"
+                className="w-[120px] md:w-[140px] h-auto drop-shadow"
+                draggable={false}
+              />
+              <div className="font-orbitron leading-tight text-white/90">
+                <p className="text-[12px] md:text-sm tracking-wide">
+                  <span className="font-semibold text-white">Buy Yearn NFT.</span>
+                </p>
+                <p className="text-[12px] md:text-sm tracking-wide">Unlock unlimited Potentials</p>
+              </div>
+            </div>
 
-              {/* Functional progress ring */}
-              <ProgressRing size={RING_SIZE} stroke={RING_STROKE} value={progress} />
-
-              {/* Brand logo inside */}
-              <div className="absolute inset-0 grid place-items-center pointer-events-none">
-                <img
-                  src={Logo}
-                  alt="Logo"
-                  draggable={false}
-                  style={{ width: Math.floor(RING_SIZE - 56), height: "auto", opacity: 0.98 }}
+            {/* Center: Video */}
+            <div className="flex-1 w-full px-4 flex items-center justify-center">
+              <div className="relative">
+                <VideoCore
+                  playing={inView && canAutoplay}
+                  showTapOverlay={lowEnd && !userTapped}
+                  onTap={() => setUserTapped(true)}
+                />
+                {/* subtle static halo */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 rounded-full"
+                  style={{ boxShadow: "0 0 60px 18px rgba(99,102,241,0.25)" }}
                 />
               </div>
+            </div>
 
-              {/* Tech chips */}
-              <div className="absolute inset-x-0 -bottom-14 flex items-center justify-center gap-2 text-[10px]">
+            {/* Tags */}
+            {!reducedMotion && (
+              <div className="w-full px-4 mt-4 flex flex-wrap items-center justify-center gap-8 md:gap-6">
                 <Chip>AI</Chip>
                 <Chip>Metaverse</Chip>
                 <Chip>NFT</Chip>
                 <Chip>Blockchain</Chip>
               </div>
+            )}
+
+            {/* Progress (bar + text) */}
+            <div className="w-full max-w-[560px] px-6 mt-4 mb-8 flex flex-col items-center gap-2">
+              <ProgressBar value={progress} />
+              <div className="text-xs md:text-sm text-white/85 leading-none flex items-center gap-2">
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Synchronizing nodes… {progress}%</span>
+              </div>
             </div>
           </div>
 
-          {/* Status line */}
-          <div className="absolute left-1/2 top-1/2 translate-x-[-50%] translate-y-[calc(50%+72px)]">
-            <div className="mx-auto flex items-center justify-center gap-2 text-xs text-white/85">
-              <Cpu className="w-3.5 h-3.5 animate-pulse" />
-              <span>Synchronizing nodes… {progress}%</span>
-            </div>
-          </div>
-
-          {/* Version badge — bottom-left */}
+          {/* Version badge */}
           <div
             className="version-badge"
             aria-label={`App version ${resolvedVersion}`}
@@ -125,102 +197,78 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
             {resolvedVersion}
           </div>
 
-          {/* scoped CSS */}
+          {/* Scoped CSS */}
           <style>{css}</style>
-        </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );
 }
 
-/* ───────────────────────── Center “Metaverse Core” ───────────────────────── */
+/* ───────────────────────── Video Core (WEBM teaser + poster) ───────────────────────── */
 
-function MetaverseCore({ size = 240 }: { size?: number }) {
-  const s = size;
-  const half = s / 2;
+function VideoCore({
+  playing,
+  showTapOverlay,
+  onTap,
+}: {
+  playing: boolean;
+  showTapOverlay: boolean;
+  onTap: () => void;
+}) {
   return (
-    <div
-      className="absolute"
-      style={{ width: s, height: s, left: `calc(50% - ${half}px)`, top: `calc(50% - ${half}px)` }}
-      aria-hidden
-    >
-      {/* Outer rotating eye rings */}
-      <svg width={s} height={s} viewBox="0 0 200 200" className="core-rotate-slow">
-        <defs>
-          <linearGradient id="coreGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#a5b4fc" />
-            <stop offset="50%" stopColor="#67e8f9" />
-            <stop offset="100%" stopColor="#f0abfc" />
-          </linearGradient>
-          {/* hex grid pattern */}
-          <pattern id="hex" width="8" height="6.928" patternUnits="userSpaceOnUse" patternTransform="scale(0.9)">
-            <path d="M2,0 L6,0 L8,3.464 L6,6.928 L2,6.928 L0,3.464 Z" fill="none" stroke="rgba(99,102,241,0.18)" strokeWidth="0.6"/>
-          </pattern>
-        </defs>
+    <div className="relative w-[260px] h-[260px] md:w-[320px] md:h-[320px]">
+      {/* Glow behind */}
+      <div
+        className="absolute inset-0 rounded-full"
+        style={{ boxShadow: "0 0 60px 20px rgba(99,102,241,0.25)" }}
+        aria-hidden
+      />
 
-        {/* Soft background glow */}
-        <circle cx="100" cy="100" r="94" fill="none" stroke="url(#coreGrad)" strokeOpacity="0.12" strokeWidth="1.2" />
-        <circle cx="100" cy="100" r="78" fill="none" stroke="url(#coreGrad)" strokeOpacity="0.18" strokeWidth="0.8" />
+      {/* Poster */}
+      <img
+        src={BotPoster}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover rounded-full opacity-80"
+        draggable={false}
+      />
 
-        {/* Radial ticks */}
-        <g className="core-rotate-fast" opacity="0.7" stroke="url(#coreGrad)">
-          {Array.from({ length: 36 }).map((_, i) => {
-            const a = (i / 36) * Math.PI * 2;
-            const r1 = 86, r2 = 92;
-            const x1 = 100 + Math.cos(a) * r1;
-            const y1 = 100 + Math.sin(a) * r1;
-            const x2 = 100 + Math.cos(a) * r2;
-            const y2 = 100 + Math.sin(a) * r2;
-            return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="0.8" strokeOpacity="0.6" />;
-          })}
-        </g>
+      {/* Video */}
+      <video
+        className="absolute inset-0 w-full h-full object-cover rounded-full"
+        src={BotVideo}
+        poster={BotPoster}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        autoPlay={playing}
+      />
 
-        {/* Inner hex grid + scanlines disc */}
-        <g>
-          <circle cx="100" cy="100" r="58" fill="url(#hex)" />
-          <circle cx="100" cy="100" r="58" className="core-scanlines" />
-          <circle cx="100" cy="100" r="58" fill="none" stroke="url(#coreGrad)" strokeOpacity="0.25" strokeWidth="0.8" />
-        </g>
+      {/* Glass ring */}
+      <div
+        className="absolute inset-0 rounded-full pointer-events-none"
+        style={{
+          boxShadow:
+            "inset 0 0 0 2px rgba(255,255,255,0.06), inset 0 0 40px rgba(255,255,255,0.08)",
+          background:
+            "radial-gradient(60% 60% at 50% 40%, rgba(255,255,255,0.08), transparent)",
+        }}
+        aria-hidden
+      />
 
-        {/* NFT diamond (holo) */}
-        <g className="core-diamond">
-          <polygon points="100,62 120,100 100,138 80,100" fill="url(#coreGrad)" opacity="0.85" />
-          <polygon points="100,62 120,100 100,100" fill="rgba(255,255,255,0.35)" />
-          <polygon points="100,62 80,100 100,100" fill="rgba(255,255,255,0.20)" />
-          <polygon points="100,100 120,100 100,138" fill="rgba(0,0,0,0.25)" />
-          <polygon points="100,100 80,100 100,138" fill="rgba(0,0,0,0.35)" />
-        </g>
-
-        {/* Orbiting nodes (chip / link / token) */}
-        <g className="core-orbit">
-          <circle cx="100" cy="100" r="72" fill="none" stroke="rgba(147,197,253,0.18)" strokeWidth="0.6"/>
-          <g className="orbit-node n1">
-            <circle r="4" fill="#67e8f9" />
-            <rect x="-3" y="-9" width="6" height="4" rx="1" fill="#1e293b" stroke="#67e8f9" strokeWidth="0.6"/>
-          </g>
-          <g className="orbit-node n2">
-            <circle r="4" fill="#a78bfa" />
-            <path d="M-3,0 L0,-3 L3,0 L0,3 Z" fill="#1e293b" stroke="#a78bfa" strokeWidth="0.6"/>
-          </g>
-          <g className="orbit-node n3">
-            <circle r="4" fill="#f0abfc" />
-            <circle r="2" fill="#1e293b" stroke="#f0abfc" strokeWidth="0.6"/>
-          </g>
-        </g>
-
-        {/* Particle spiral */}
-        <g className="core-spiral">
-          {Array.from({ length: 24 }).map((_, i) => {
-            const t = i / 24;
-            const r = 20 + t * 34;
-            const a = t * Math.PI * 4;
-            const x = 100 + Math.cos(a) * r;
-            const y = 100 + Math.sin(a) * r;
-            const op = 0.25 + 0.6 * t;
-            return <circle key={i} cx={x} cy={y} r={0.9 + t * 1.1} fill="white" opacity={op} />;
-          })}
-        </g>
-      </svg>
+      {/* Low-end “Tap to play” */}
+      {showTapOverlay && (
+        <div className="absolute inset-0 grid place-items-center">
+          <button
+            type="button"
+            onClick={onTap}
+            className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 bg-black/55 text-white text-[12px] ring-1 ring-white/15 hover:bg-black/70"
+          >
+            Tap to play
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -235,34 +283,21 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ProgressRing({
-  size = 120,
-  stroke = 6,
-  value = 0,
-}: { size?: number; stroke?: number; value?: number }) {
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const dash = (value / 100) * c;
-
+function ProgressBar({ value = 0 }: { value?: number }) {
+  const pct = Math.max(0, Math.min(100, value));
   return (
-    <svg width={size} height={size} style={{ filter: "drop-shadow(0 10px 30px rgba(99,102,241,0.35))" }}>
-      <defs>
-        <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#a5b4fc" />
-          <stop offset="50%" stopColor="#67e8f9" />
-          <stop offset="100%" stopColor="#f0abfc" />
-        </linearGradient>
-      </defs>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="url(#ring)" opacity="0.20" strokeWidth={stroke} />
-      <motion.circle
-        cx={size/2} cy={size/2} r={r}
-        fill="none" stroke="url(#ring)" strokeLinecap="round" strokeWidth={stroke}
-        strokeDasharray={`${dash} ${c - dash}`}
-        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6 }}
-        style={{ transform: "rotate(-90deg)", transformOrigin: "50% 50%" }}
-      />
-      <circle cx={size/2} cy={size/2} r={r - 18} fill="rgba(7,10,17,0.65)" />
-    </svg>
+    <div className="w-full">
+      <div className="h-2.5 w-full rounded-full bg-white/10 backdrop-blur-sm ring-1 ring-white/10 overflow-hidden">
+        <div
+          className="h-full progress-fill"
+          style={{ width: `${pct}%` }}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          role="progressbar"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -342,6 +377,9 @@ function Rocket() {
 /* ───────────────────────── Scoped CSS ───────────────────────── */
 
 const css = `
+/* Orbitron/Audiowide utility (fallback to system) */
+.font-orbitron { font-family: 'Orbitron','Audiowide',system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif; }
+
 /* stars */
 .star { background: rgba(255,255,255,0.9); box-shadow: 0 0 6px rgba(255,255,255,0.35); opacity: .15; animation: starTwinkle 5s ease-in-out infinite; }
 @keyframes starTwinkle { 0%{opacity:.15} 50%{opacity:.9} 100%{opacity:.2} }
@@ -353,21 +391,20 @@ const css = `
 .rocket-float { animation: floatY 5.5s ease-in-out infinite; }
 @keyframes floatY { 0%{transform:translateY(0)} 50%{transform:translateY(-8px)} 100%{transform:translateY(0)} }
 
-/* core animations */
-.core-rotate-slow { animation: coreSpin 20s linear infinite; transform-origin:center; }
-.core-rotate-fast { animation: coreSpin 12s linear infinite; transform-origin:center; }
-@keyframes coreSpin { from{transform:rotate(0)} to{transform:rotate(360deg)} }
-.core-scanlines { fill: repeating-linear-gradient( to bottom, rgba(255,255,255,0.05) 0 2px, rgba(255,255,255,0.0) 2px 5px ); opacity:.25; }
-.core-diamond { animation: diamondPulse 2.4s ease-in-out infinite; transform-origin: 100px 100px; }
-@keyframes diamondPulse { 0%{transform:scale(1) rotate(0deg)} 50%{transform:scale(1.06) rotate(3deg)} 100%{transform:scale(1) rotate(0deg)} }
-.core-orbit { animation: orbitTurn 16s linear infinite; transform-origin:100px 100px; }
-@keyframes orbitTurn { from{transform:rotate(0)} to{transform:rotate(360deg)} }
-.orbit-node { transform-origin: 100px 100px; }
-.orbit-node.n1 { transform: translate(100px,100px) rotate(0deg) translate(72px,0); }
-.orbit-node.n2 { transform: translate(100px,100px) rotate(120deg) translate(72px,0); }
-.orbit-node.n3 { transform: translate(100px,100px) rotate(240deg) translate(72px,0); }
-.core-spiral { animation: spiralFade 4.8s ease-in-out infinite; transform-origin: 100px 100px; opacity:.8; }
-@keyframes spiralFade { 0%,100%{opacity:.65} 50%{opacity:1} }
+/* progress bar fill */
+.progress-fill {
+  background: linear-gradient(90deg, #a5b4fc, #67e8f9, #f0abfc);
+  box-shadow: 0 0 18px rgba(99,102,241,0.35);
+}
+
+/* chip polish */
+span.rounded-full.bg-white\\/8 {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(6px);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
 
 /* Version badge */
 .version-badge {
@@ -385,11 +422,11 @@ const css = `
   border: 1px solid rgba(148,163,184,0.22);
   backdrop-filter: blur(6px);
   box-shadow: 0 6px 16px rgba(0,0,0,0.25), inset 0 0 12px rgba(99,102,241,0.15);
-  pointer-events: none; /* non-interactive, purely informational */
+  pointer-events: none;
 }
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .star, .lp-planet, .astro-float, .rocket-float, .core-rotate-slow, .core-rotate-fast, .core-diamond, .core-orbit, .core-spiral { animation: none !important; }
+  .star, .lp-planet, .astro-float, .rocket-float { animation: none !important; }
 }
 `;
