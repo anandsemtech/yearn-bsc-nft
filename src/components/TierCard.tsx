@@ -83,7 +83,6 @@ const isMobile = () =>
 const isMetaMaskUA = () =>
   typeof window !== "undefined" && (window as any)?.ethereum?.isMetaMask === true;
 
-
 // Put below: const isMetaMaskUA = ...
 const shortenMid = (v?: string, left = 10, right = 6) => {
   if (!v) return "";
@@ -102,13 +101,14 @@ const isLowEndDevice = () => {
   }
 };
 
-const isLikelyImage = (u?: string) => !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
-const isLikelyVideo = (u?: string) => !!u && /\.(mp4|webm|mov|ogv)$/i.test(u.split("?")[0] ?? "");
+const isLikelyImage = (u?: string) =>
+  !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
+const isLikelyVideo = (u?: string) =>
+  !!u && /\.(mp4|webm|mov|ogv)$/i.test(u.split("?")[0] ?? "");
 const isGif = (u?: string) =>
   !!u && /\.gif(\?.*)?$/i.test((u.split("?")[0] ?? ""));
 const isSvg = (u?: string) =>
   !!u && /\.svg(\?.*)?$/i.test((u.split("?")[0] ?? ""));
-
 
 // Optional lightweight IPFS image optimizer (works with Cloudflare IPFS or any gateway that ignores unknown params)
 const optimizeImageUrl = (url?: string, width = 800) => {
@@ -133,7 +133,6 @@ const optimizeImageUrl = (url?: string, width = 800) => {
   }
 };
 
-
 /** Build responsive src/srcSet for images (ipfs.io supported via proxy). */
 const buildSrcSet = (url?: string) => {
   // For GIF/SVG: keep original (no srcset), avoids losing animation or vector sharpness
@@ -149,12 +148,10 @@ const buildSrcSet = (url?: string) => {
   };
 };
 
-
-
 const CopyField: React.FC<{
   label: string;
   value: string;
-  display?: string;     // pretty, shortened version (shown)
+  display?: string; // pretty, shortened version (shown)
   mono?: boolean;
   color?: "indigo" | "cyan" | "violet";
 }> = ({ label, value, display, mono, color = "indigo" }) => {
@@ -196,7 +193,6 @@ const CopyField: React.FC<{
   );
 };
 
-
 type Props = {
   passAddress: Address;
   marketAddress: Address;
@@ -223,7 +219,6 @@ const format5 = (value: bigint, decimals = 18) => {
   if (Math.abs(n) < 0.00001) return "<0.00001";
   return n.toFixed(5);
 };
-
 
 /** IPFS helper */
 const ipfsToHttp = (uri?: string, gateway = DEFAULT_IPFS_GATEWAY): string | undefined => {
@@ -431,12 +426,16 @@ export default function TierCard({
 
   const lowEnd = React.useMemo(() => isLowEndDevice(), []);
 
-
   const { isConnected, address, chain, status } = useAccount();
-  const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
   const currentChainId = useChainId();
+
+  // ✅ Always use a public client bound to the connected chain
+  const connectedChainId = (chain?.id ?? currentChainId) as number | undefined;
+  const publicClient = usePublicClient(
+    connectedChainId ? ({ chainId: connectedChainId } as any) : undefined
+  );
 
   // Payment token env
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
@@ -475,6 +474,7 @@ export default function TierCard({
 
   /* NEW: native gas fee + balance tracking */
   const [nativeBal, setNativeBal] = React.useState<bigint>(0n);
+  const [nativeBalReady, setNativeBalReady] = React.useState(false); // ✅ readiness flag
   const [feeApprove, setFeeApprove] = React.useState<bigint | null>(null);
   const [feeBuy, setFeeBuy] = React.useState<bigint | null>(null);
   const feeSymbol = chain?.nativeCurrency?.symbol || "BNB";
@@ -618,13 +618,19 @@ export default function TierCard({
     return nativeBal >= padded;
   };
 
+  // ✅ Optional UX polish: clamp very tiny displayed needs to ≈0.00001
   const gasWarnLine = (needWei?: bigint | null) => {
     const have = format5(nativeBal);
     if (!needWei || needWei <= 0n) {
       return `Looks like you might need some ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}. Add a little more and try again.`;
     }
-    const need = format5(needWei);
-    return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${need} ${feeSymbol}. Please top up and try again.`;
+    const needNum = Number(formatUnits(needWei, 18));
+    const needPretty = !isFinite(needNum) || needNum <= 0
+      ? "≈0.00001"
+      : needNum < 1e-5
+      ? "≈0.00001"
+      : needNum.toFixed(5);
+    return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${needPretty} ${feeSymbol}. Please top up and try again.`;
   };
 
   /** Metadata */
@@ -772,6 +778,7 @@ export default function TierCard({
       setFeeApprove(null);
       setFeeBuy(null);
       setNativeBal(0n);
+      setNativeBalReady(false);
     }
   }, [status]);
 
@@ -806,25 +813,35 @@ export default function TierCard({
     };
   }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
 
-  /** Native balance watcher */
+  /** Native balance watcher (✅ ready-gated & chain-bound) */
   React.useEffect(() => {
     let stop = false;
+    setNativeBalReady(false);
     (async () => {
       if (!connected || !address || !publicClient) {
-        if (!stop) setNativeBal(0n);
+        if (!stop) {
+          setNativeBal(0n);
+          setNativeBalReady(false);
+        }
         return;
       }
       try {
         const bal = await publicClient.getBalance({ address });
-        if (!stop) setNativeBal(bal);
+        if (!stop) {
+          setNativeBal(bal);
+          setNativeBalReady(true);
+        }
       } catch {
-        if (!stop) setNativeBal(0n);
+        if (!stop) {
+          setNativeBal(0n);
+          setNativeBalReady(true);
+        }
       }
     })();
     return () => {
       stop = true;
     };
-  }, [connected, address, publicClient]);
+  }, [connected, address, publicClient, chain?.id, currentChainId]);
 
   /** Live fee estimates */
   React.useEffect(() => {
@@ -879,9 +896,10 @@ export default function TierCard({
   const rewriteGasError = (raw?: string | null) => {
     if (!raw) return null;
     const s = String(raw);
-    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(
-      s
-    );
+    const match =
+      /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(
+        s
+      );
     if (match) {
       const op = lastActionRef.current;
       const need =
@@ -1192,7 +1210,6 @@ export default function TierCard({
   const glare = useMotionTemplate`radial-gradient(420px circle at ${xPct}% ${yPct}%, rgba(255,255,255,.12), transparent 45%)`;
 
   const checksumPass = React.useMemo(() => {
-
     try {
       return getAddress(passAddress);
     } catch {
@@ -1203,12 +1220,13 @@ export default function TierCard({
   const tokenIdDec = String(tier.id);
   const tokenIdHex = `0x${idHex64(tier.id)}`;
 
-  // Gas chip only when we have a real estimate
+  // Gas chip only when we have a real estimate — and after balance is ready
   const haveFeeApprove = hasValue(feeApprove);
   const haveFeeBuy = hasValue(feeBuy);
   const showGasChip =
     !owned &&
     connected &&
+    nativeBalReady &&
     ((allowance < price && haveFeeApprove && !hasEnoughFor(feeApprove)) ||
       (haveFeeBuy && !hasEnoughFor(feeBuy)));
 
@@ -1216,7 +1234,7 @@ export default function TierCard({
 
   return visible ? (
     <motion.div
-      layout="position"   // ← add this
+      layout="position" // ← add this
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
@@ -1228,7 +1246,6 @@ export default function TierCard({
             <CursorGlow x={x} y={y} />
             {!lowEnd && <GradientMesh />}
             {!lowEnd && <Scanlines />}
-
 
             {/* MEDIA */}
             <motion.div
@@ -1254,7 +1271,6 @@ export default function TierCard({
               <div className="pointer-events-none absolute inset-0 z-10 [content-visibility:auto] [contain-intrinsic-size:320px_240px]">
                 {!lowEnd && <MetaverseScene />}
 
-
                 <div className="absolute inset-0 grid place-items-center">
                   {mediaUrl ? (
                     isVideo ? (
@@ -1273,7 +1289,6 @@ export default function TierCard({
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
-
                     ) : (
                       <motion.img
                         key={optimizedSet.src || mediaUrl}
@@ -1290,7 +1305,6 @@ export default function TierCard({
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 140, damping: 18 }}
                       />
-
                     )
                   ) : (
                     <motion.div
@@ -1554,11 +1568,8 @@ export default function TierCard({
                     />
                   </button>
 
-                 <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
-
-
-                      <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
-
+                  <div className={`acc ${showImportHelp ? "acc-open" : "acc-closed"}`}>
+                    <div className="px-3 pt-3 pb-2 text-[12px] text-white/80 space-y-2 bg-black/35 ring-1 ring-white/10 rounded-lg mt-2">
                       <p className="leading-relaxed">
                         MetaMask Mobile sometimes doesn’t auto-detect ERC-1155. Import it manually:
                       </p>
@@ -1599,7 +1610,6 @@ export default function TierCard({
                           </p>
                         )}
                       </div>
-
                     </div>
                   </div>
                 </div>
@@ -1616,7 +1626,6 @@ export default function TierCard({
         .acc { overflow:hidden; transition:max-height .24s ease, opacity .24s ease; will-change:max-height, opacity; }
         .acc-closed { max-height:0; opacity:0; }
         .acc-open { max-height:420px; opacity:1; } /* large enough for the help content */
-
       `}</style>
     </motion.div>
   ) : null;
