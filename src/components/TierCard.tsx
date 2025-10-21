@@ -46,6 +46,12 @@ import {
   YEARN_TOKEN_SYMBOL,
 } from "../lib/constants";
 
+/* ---------- tiny logger (debug-level) ---------- */
+const log = (...args: any[]) => {
+  // Using debug to keep console clean in prod (can be filtered)
+  console.debug("[TierCard]", ...args);
+};
+
 /* Fonts once */
 const ensureOrbitronLink = (() => {
   let done = false;
@@ -432,10 +438,19 @@ export default function TierCard({
   const currentChainId = useChainId();
 
   // ✅ Always use a public client bound to the connected chain
-  const connectedChainId = (chain?.id ?? currentChainId) as number | undefined;
+  // strict to the wallet's chain; avoids reading the wrong network
   const publicClient = usePublicClient(
-    connectedChainId ? ({ chainId: connectedChainId } as any) : undefined
+    chain?.id ? ({ chainId: chain.id } as any) : undefined
   );
+
+  // Log hook chain bindings when they change
+  React.useEffect(() => {
+    log("hooks", {
+      walletChainId: chain?.id,
+      wagmiUseChainId: currentChainId,
+      publicClientChainId: (publicClient as any)?.chain?.id,
+    });
+  }, [chain?.id, currentChainId, publicClient]);
 
   // Payment token env
   const payTokenAddress = (tokenAddress ?? YEARN_TOKEN) as Address;
@@ -613,13 +628,32 @@ export default function TierCard({
   ]);
 
   const hasEnoughFor = (needWei?: bigint | null, padBps = 800) => {
+    // If native balance isn't ready, don't block the user with a gas warning yet.
+    if (!nativeBalReady) return true;
     if (!needWei || needWei <= 0n) return true;
     const padded = (needWei * BigInt(10000 + padBps)) / 10000n;
-    return nativeBal >= padded;
+    const ok = nativeBal >= padded;
+    log("gas-check", {
+      op: lastActionRef.current,
+      needWei: needWei?.toString(),
+      paddedWei: padded.toString(),
+      nativeBalWei: nativeBal.toString(),
+      nativeBalReady,
+      chainInfo: {
+        walletChainId: chain?.id,
+        publicClientChainId: (publicClient as any)?.chain?.id,
+        wagmiUseChainId: currentChainId,
+      },
+      ok,
+    });
+    return ok;
   };
 
   // ✅ Optional UX polish: clamp very tiny displayed needs to ≈0.00001
   const gasWarnLine = (needWei?: bigint | null) => {
+    if (!nativeBalReady) {
+      return `Fetching ${feeSymbol} balance… please try again in a moment.`;
+    }
     const have = format5(nativeBal);
     if (!needWei || needWei <= 0n) {
       return `Looks like you might need some ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}. Add a little more and try again.`;
@@ -634,6 +668,10 @@ export default function TierCard({
   };
 
   /** Metadata */
+  React.useEffect(() => {
+      // not balance-related
+  }, []);
+
   React.useEffect(() => {
     let aborted = false;
     const ctrl = new AbortController();
@@ -747,6 +785,14 @@ export default function TierCard({
           }) as Promise<bigint>,
         ]);
 
+        log("read-ownership/prices/allowance", {
+          walletChainId: chain?.id,
+          publicClientChainId: (publicClient as any)?.chain?.id,
+          wagmiUseChainId: currentChainId,
+          allowanceWei: a?.toString?.(),
+          token: payTokenAddress,
+        });
+
         if (!stop) {
           setOwned(bal > 0n);
           setPrice(pYour);
@@ -755,14 +801,15 @@ export default function TierCard({
           setWlPrice(pWl);
           setAllowance(a);
         }
-      } catch {
+      } catch (e) {
+        log("read-ownership/prices/allowance:error", e);
         if (!stop) setErr("Unable to fetch price/whitelist right now.");
       }
     })();
     return () => {
       stop = true;
     };
-  }, [address, publicClient, tier.id, passAddress, marketAddress, payTokenAddress]);
+  }, [address, publicClient, tier.id, passAddress, marketAddress, payTokenAddress, chain?.id, currentChainId]);
 
   /** Reset on disconnect */
   React.useEffect(() => {
@@ -779,6 +826,7 @@ export default function TierCard({
       setFeeBuy(null);
       setNativeBal(0n);
       setNativeBalReady(false);
+      log("wallet-disconnected: cleared balances and state");
     }
   }, [status]);
 
@@ -797,21 +845,33 @@ export default function TierCard({
           if (!stop) setTokenBal(0n);
           return;
         }
+        log("read-erc20-balance:start", {
+          address,
+          token: payTokenAddress,
+          walletChainId: chain?.id,
+          publicClientChainId: (publicClient as any)?.chain?.id,
+          wagmiUseChainId: currentChainId,
+        });
         const bal = (await publicClient.readContract({
           address: payTokenAddress,
           abi: ERC20_ABI,
           functionName: "balanceOf",
           args: [address],
         })) as bigint;
+        log("read-erc20-balance:done", {
+          token: payTokenAddress,
+          balanceWei: bal?.toString?.(),
+        });
         if (!stop) setTokenBal(bal);
-      } catch {
+      } catch (e) {
+        log("read-erc20-balance:error", e);
         if (!stop) setTokenBal(0n);
       }
     })();
     return () => {
       stop = true;
     };
-  }, [connected, address, publicClient, payTokenAddress, needsToken, price]);
+  }, [connected, address, publicClient, payTokenAddress, needsToken, price, chain?.id, currentChainId]);
 
   /** Native balance watcher (✅ ready-gated & chain-bound) */
   React.useEffect(() => {
@@ -826,12 +886,27 @@ export default function TierCard({
         return;
       }
       try {
+        log("read-native-balance:start", {
+          address,
+          walletChainId: chain?.id,
+          publicClientChainId: (publicClient as any)?.chain?.id,
+          wagmiUseChainId: currentChainId,
+        });
         const bal = await publicClient.getBalance({ address });
+        log("read-native-balance:done", {
+          address,
+          balanceWei: bal?.toString?.(),
+          feeSymbol,
+        });
         if (!stop) {
           setNativeBal(bal);
           setNativeBalReady(true);
         }
-      } catch {
+      } catch (e) {
+        log("read-native-balance:error", e, {
+          walletChainId: chain?.id,
+          publicClientChainId: (publicClient as any)?.chain?.id,
+        });
         if (!stop) {
           setNativeBal(0n);
           setNativeBalReady(true);
@@ -841,7 +916,7 @@ export default function TierCard({
     return () => {
       stop = true;
     };
-  }, [connected, address, publicClient, chain?.id, currentChainId]);
+  }, [connected, address, publicClient, chain?.id, currentChainId, feeSymbol]);
 
   /** Live fee estimates */
   React.useEffect(() => {
@@ -855,12 +930,22 @@ export default function TierCard({
         return;
       }
       try {
+        log("estimate-fees:start", {
+          walletChainId: chain?.id,
+          publicClientChainId: (publicClient as any)?.chain?.id,
+          wagmiUseChainId: currentChainId,
+        });
         const [fa, fb] = await Promise.all([estimateApproveFee(), estimateBuyFee()]);
+        log("estimate-fees:done", {
+          approveWei: fa?.toString?.(),
+          buyWei: fb?.toString?.(),
+        });
         if (!stop) {
           setFeeApprove(fa);
           setFeeBuy(fb);
         }
-      } catch {
+      } catch (e) {
+        log("estimate-fees:error", e);
         if (!stop) {
           setFeeApprove(null);
           setFeeBuy(null);
@@ -876,6 +961,7 @@ export default function TierCard({
     allowance,
     price,
     chain?.id,
+    currentChainId,
   ]);
 
   /** Filter */
@@ -895,6 +981,10 @@ export default function TierCard({
   /* -------- approve/buy with gas pre-checks + friendly errors -------- */
   const rewriteGasError = (raw?: string | null) => {
     if (!raw) return null;
+
+    // ⛑️ Don’t convert into a gas warning until we know the real native balance.
+    if (!nativeBalReady) return null;
+
     const s = String(raw);
     const match =
       /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(
@@ -904,6 +994,15 @@ export default function TierCard({
       const op = lastActionRef.current;
       const need =
         op === "buy" ? feeBuy ?? roughBuyFee() : feeApprove ?? roughApproveFee();
+      log("rewrite-gas-error", {
+        op,
+        nativeBalReady,
+        nativeBalWei: nativeBal.toString(),
+        needWei: need?.toString?.(),
+        walletChainId: chain?.id,
+        publicClientChainId: (publicClient as any)?.chain?.id,
+        wagmiUseChainId: currentChainId,
+      });
       return gasWarnLine(need);
     }
     return null;
@@ -934,12 +1033,22 @@ export default function TierCard({
     // Pre-flight gas check (use rough if estimate missing)
     try {
       const est = (await estimateApproveFee()) ?? roughApproveFee();
+      log("preflight-approve", {
+        estWei: est?.toString?.(),
+        nativeBalWei: nativeBal.toString(),
+        nativeBalReady,
+      });
       if (est > 0n && !hasEnoughFor(est)) {
         setErr(gasWarnLine(est));
         return;
       }
     } catch {
       const rough = roughApproveFee();
+      log("preflight-approve:rough", {
+        roughWei: rough?.toString?.(),
+        nativeBalWei: nativeBal.toString(),
+        nativeBalReady,
+      });
       if (!hasEnoughFor(rough)) {
         setErr(gasWarnLine(rough));
         return;
@@ -1024,6 +1133,8 @@ export default function TierCard({
     price,
     estimateApproveFee,
     roughApproveFee,
+    nativeBal,
+    nativeBalReady,
   ]);
 
   /** Buy with preflight + chain switch (estimate after switch) */
@@ -1057,7 +1168,7 @@ export default function TierCard({
     setTxStage("waiting");
     try {
       // Ensure wallet is on the same chain as publicClient
-      const targetChainId = publicClient.chain?.id ?? chain?.id ?? currentChainId;
+      const targetChainId = (publicClient as any)?.chain?.id ?? chain?.id ?? currentChainId;
       if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
         try {
           await switchChainAsync({ chainId: targetChainId });
@@ -1088,6 +1199,11 @@ export default function TierCard({
       // Preflight: use estimate; if missing, use rough hint
       try {
         const est = (await estimateBuyFee()) ?? roughBuyFee();
+        log("preflight-buy", {
+          estWei: est?.toString?.(),
+          nativeBalWei: nativeBal.toString(),
+          nativeBalReady,
+        });
         if (est > 0n && !hasEnoughFor(est)) {
           setBusy(false);
           setTxStage("hidden");
@@ -1096,6 +1212,11 @@ export default function TierCard({
         }
       } catch {
         const rough = roughBuyFee();
+        log("preflight-buy:rough", {
+          roughWei: rough?.toString?.(),
+          nativeBalWei: nativeBal.toString(),
+          nativeBalReady,
+        });
         if (!hasEnoughFor(rough)) {
           setBusy(false);
           setTxStage("hidden");
@@ -1190,6 +1311,8 @@ export default function TierCard({
     payTokenSymbol,
     estimateBuyFee,
     roughBuyFee,
+    nativeBal,
+    nativeBalReady,
   ]);
 
   // Labels
