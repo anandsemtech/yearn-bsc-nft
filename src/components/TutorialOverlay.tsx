@@ -11,7 +11,7 @@ import { ChevronRight, ChevronLeft } from "lucide-react";
 /* -------------------------------------------------------------------------- */
 import tutorial1Img from "../assets/tutorial1.png";
 import tutorial2Img from "../assets/tutorial2.png";
-import tutorial3Img from "../assets/tutorial2.png";
+import tutorial3Img from "../assets/tutorial3.png";
 
 type Media =
   | { type: "video"; src: string; alt: string }

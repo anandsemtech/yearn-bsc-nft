@@ -666,8 +666,9 @@ export default function TierCard({
         const media = data?.animation_url || data?.image;
         const http = pick(media);
         setMediaUrl(http);
-        const isVid =
-          !!http && (/\.(mp4|webm|mov|ogv)$/i.test(http) || (!!data?.animation_url && !/\.(png|jpe?g|gif|webp|svg)$/i.test(http)));
+
+        // 🚫 Treat GIFs as images (never as "video"). Video is only for teaser/placeholder.
+        const isVid = !!http && !isGif(http) && /\.(mp4|webm|mov|ogv)$/i.test(http);
         setIsVideo(isVid);
       } catch {}
     })();
@@ -734,7 +735,7 @@ export default function TierCard({
       setFeeApprove(null); setFeeBuy(null);
       setNativeBal(0n); setNativeBalReady(false);
       // also clear any local pending guard
-      
+
       const key = address ? pendingKey(address as Address) : null;
 
       if (key) localStorage.removeItem(key);
@@ -1088,6 +1089,34 @@ export default function TierCard({
   const [mediaLoaded, setMediaLoaded] = React.useState(false);
   const [userTappedToLoad, setUserTappedToLoad] = React.useState(false);
 
+  // NEW: GIF preload state + helper
+  const [gifReady, setGifReady] = React.useState(false);
+  const [playableGif, setPlayableGif] = React.useState<string | undefined>(undefined);
+
+  const preloadGif = React.useCallback((url?: string) => {
+    setGifReady(false);
+    setPlayableGif(undefined);
+    if (!url || !isGif(url)) return;
+    const img = new Image();
+    // @ts-ignore
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    img.crossOrigin = "anonymous";
+    img.onload = async () => {
+      try {
+        // @ts-ignore
+        if (img.decode) await img.decode();
+      } catch {}
+      setPlayableGif(url);
+      setGifReady(true);
+    };
+    img.onerror = () => {
+      setPlayableGif(url); // still try to show it; don't hang
+      setGifReady(true);
+    };
+    img.src = url;
+  }, []);
+
   React.useEffect(() => {
     if (!mediaHostRef.current || typeof IntersectionObserver === "undefined") {
       setInView(true); return;
@@ -1095,7 +1124,7 @@ export default function TierCard({
     const el = mediaHostRef.current;
     const io = new IntersectionObserver(
       (entries) => { const e = entries[0]; setInView(e?.isIntersecting ?? false); },
-      { rootMargin: "200px 0px", threshold: 0.01 }
+      { rootMargin: "800px 0px", threshold: 0 }
     );
     io.observe(el);
     return () => io.disconnect();
@@ -1114,21 +1143,46 @@ export default function TierCard({
 
   const isHeavyGif = React.useMemo(() => !!mediaUrl && isGif(mediaUrl), [mediaUrl]);
 
+  // Mount media as soon as it's near and not actively scrolling (no idle gating)
   React.useEffect(() => {
-    const ready = inView && !isScrolling && (!lowEnd || (lowEnd && userTappedToLoad));
+    const ready = inView && !isScrolling;
     if (ready && !showMedia) {
-      const id = (window as any).requestIdleCallback
-        ? (window as any).requestIdleCallback(() => setShowMedia(true))
-        : setTimeout(() => setShowMedia(true), 80) as any;
-      return () => { if (typeof id === "number") clearTimeout(id as number); };
+      const id = setTimeout(() => setShowMedia(true), 0);
+      return () => clearTimeout(id);
     }
-  }, [inView, isScrolling, lowEnd, userTappedToLoad, showMedia]);
+  }, [inView, isScrolling, showMedia]);
 
+  // Safety: if metadata is present but nothing mounted yet, force mount
+  React.useEffect(() => {
+    if (!meta || showMedia) return;
+    const id = setTimeout(() => setShowMedia(true), 2500);
+    return () => clearTimeout(id);
+  }, [meta, showMedia]);
+
+  // Reset on media change
   React.useEffect(() => {
     setShowMedia(false);
     setMediaLoaded(false);
     setUserTappedToLoad(false);
+    setGifReady(false);
+    setPlayableGif(undefined);
   }, [mediaUrl]);
+
+  // Only preload GIFs when allowed (low-end requires tap first)
+  React.useEffect(() => {
+    if (!isGif(mediaUrl)) { setGifReady(false); setPlayableGif(undefined); return; }
+    if (lowEnd && !userTappedToLoad) { setGifReady(false); setPlayableGif(undefined); return; }
+    preloadGif(mediaUrl);
+  }, [mediaUrl, preloadGif, lowEnd, userTappedToLoad]);
+
+  // Extra guard: never let the loader hang forever
+  const stallRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    if (!showMedia || mediaLoaded) return;
+    if (stallRef.current) clearTimeout(stallRef.current);
+    stallRef.current = setTimeout(() => setMediaLoaded(true), 5000);
+    return () => { if (stallRef.current) clearTimeout(stallRef.current); };
+  }, [showMedia, mediaLoaded]);
 
   /* ───────────────────────────────────────────────────────────── */
 
@@ -1185,42 +1239,80 @@ export default function TierCard({
                   )}
 
                   {/* Actual media (mounts only when should show) */}
-                  {showMedia && mediaUrl ? (
-                    isVideo ? (
-                      <motion.video
-                        key={mediaUrl}
-                        src={mediaUrl}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                        preload="metadata"
-                        disablePictureInPicture
-                        controls={false}
-                        onLoadedData={() => setMediaLoaded(true)}
-                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none rounded-lg ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
-                        initial={{ scale: 0.985 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
-                      />
-                    ) : (
-                      <motion.img
-                        key={mediaUrl}
-                        src={isGif(mediaUrl) ? mediaUrl : optimizedSet.src}
-                        srcSet={isGif(mediaUrl) ? undefined : optimizedSet.srcSet}
-                        sizes={isGif(mediaUrl) ? undefined : optimizedSet.sizes}
-                        alt={name}
-                        loading="lazy"
-                        decoding="async"
-                        {...({ fetchpriority: "low" } as any)}
-                        draggable={false}
-                        onLoad={() => setMediaLoaded(true)}
-                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
-                        initial={{ scale: 0.985 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
-                      />
-                    )
+                  {showMedia ? (
+                    isGif(mediaUrl) ? (
+                      <>
+                        {/* 1) Keep teaser video behind while GIF loads (and on low-end until user taps) */}
+                        {(!gifReady || (lowEnd && !userTappedToLoad)) && (
+                          <motion.video
+                            key="teaser-webm"
+                            src={BotVideo}
+                            poster={BotPoster}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            preload="auto"
+                            className="absolute inset-0 m-auto w-[68%] h-auto rounded-lg opacity-80"
+                          />
+                        )}
+
+                        {/* 2) Swap to the actual GIF as soon as it’s decoded (or after user taps on low-end) */}
+                        {playableGif && (!lowEnd || userTappedToLoad) && (
+                          <motion.img
+                            key={playableGif}
+                            src={playableGif}
+                            alt={name}
+                            loading="eager"
+                            decoding="async"
+                            draggable={false}
+                            onLoad={() => setMediaLoaded(true)}      // end loader
+                            onError={() => setMediaLoaded(true)}     // don't hang
+                            className={`relative z-10 w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
+                            initial={{ scale: 0.985 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                          />
+                        )}
+                      </>
+                    ) : mediaUrl ? (
+                      (/\.(mp4|webm|mov|ogv)$/i.test(mediaUrl)) ? (
+                        <motion.video
+                          key={mediaUrl}
+                          src={mediaUrl}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          preload="auto"
+                          disablePictureInPicture
+                          controls={false}
+                          onLoadedData={() => setMediaLoaded(true)}
+                          onError={() => setMediaLoaded(true)}
+                          className={`w-[78%] md:w-[70%] h-auto object-contain select-none rounded-lg ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
+                          initial={{ scale: 0.985 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                        />
+                      ) : (
+                        <motion.img
+                          key={mediaUrl}
+                          src={optimizedSet.src}
+                          srcSet={optimizedSet.srcSet}
+                          sizes={optimizedSet.sizes}
+                          alt={name}
+                          loading="lazy"
+                          decoding="async"
+                          draggable={false}
+                          onLoad={() => setMediaLoaded(true)}
+                          onError={() => setMediaLoaded(true)}
+                          className={`w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
+                          initial={{ scale: 0.985 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                        />
+                      )
+                    ) : null
                   ) : null}
                 </div>
                 {/* ───────────── /Deferred media region ───────────── */}
@@ -1387,7 +1479,7 @@ export default function TierCard({
                           >
                             {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Approving…</span> : "Approve"}
                           </button>
-                          <button disabled className="w-full rounded-xl px-4 py-3 bg黑/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
+                          <button disabled className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
                             Buy
                           </button>
                         </div>
