@@ -4,49 +4,58 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 
-/** Replace these with your real looping MP4/WebM/WebP/GIF assets */
-type Media = { type: "video" | "image"; src: string; alt: string };
+/* -------------------------------------------------------------------------- */
+/*                             Import your assets                              */
+/*  If you keep files in src/assets, import them.                              */
+/*  If you prefer public/assets, you can revert to "/assets/..." paths.       */
+/* -------------------------------------------------------------------------- */
+import tutorial1Img from "../assets/tutorial1.png";
+import tutorial2Img from "../assets/tutorial2.png";
+import tutorial3Img from "../assets/tutorial2.png";
+
+type Media =
+  | { type: "video"; src: string; alt: string }
+  | { type: "image"; src: string; alt: string };
+
 type Slide = {
-  title: string;      // short + uplifting
-  caption?: string;   // tiny micro-copy (no jargon)
-  media: Media;       // hero animation
-  from: string;       // gradient from-
-  to: string;         // gradient to-
+  title: string;
+  caption?: string;
+  media: Media;
+  from: string;
+  to: string;
 };
 
 const SLIDES: Slide[] = [
   {
-    // Myth-breaker: “simple doesn’t mean small”
     title: "Simple can become legendary. ✨",
     caption:
       "Iconic early NFTs proved that a moment can turn into history. Start bold—hesitation is the only myth.",
-    media: { type: "video", src: "/assets/tutorial/myth-breaker.mp4", alt: "Myth breaking orb and shards" },
+    media: { type: "image", src: tutorial1Img, alt: "Myth breaking orb and shards" },
     from: "from-amber-400/25",
     to: "to-rose-400/20",
   },
   {
-    // YearnTogether vision: access + future potential (no jargon)
     title: "YearnTogether opens the doors. 🔓",
     caption:
       "One pass. Many worlds. Access today—potential for tomorrow. Your journey scales with our growing ecosystem.",
-    media: { type: "video", src: "/assets/tutorial/portals.mp4", alt: "Opening portals and rings" },
+    // Was incorrectly typed as "video" with a PNG. Make it an image.
+    media: { type: "image", src: tutorial2Img, alt: "Opening portals and rings" },
     from: "from-indigo-500/25",
     to: "to-cyan-400/20",
   },
   {
-    // Warm welcome + success tone
     title: "You’re in the right place. 🌱",
     caption:
       "Thanks for choosing Yearn NFTs. You belong here. Let’s grow together—community first, momentum always.",
-    media: { type: "video", src: "/assets/tutorial/crown-flare.mp4", alt: "Crown with radiant flare" },
+    media: { type: "image", src: tutorial3Img, alt: "Crown with radiant flare" },
     from: "from-emerald-400/25",
     to: "to-teal-400/20",
   },
 ];
 
 type Props = {
-  open: boolean;     // controlled: show/hide
-  onDone: () => void; // called after last slide (or Skip)
+  open: boolean;
+  onDone: () => void;
 };
 
 export default function TutorialOverlay({ open, onDone }: Props) {
@@ -58,10 +67,12 @@ export default function TutorialOverlay({ open, onDone }: Props) {
   React.useEffect(() => {
     const prev = document.body.style.overflow;
     if (open) document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
-  // keyboard nav — user events only (never during render)
+  // keyboard nav
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -78,7 +89,7 @@ export default function TutorialOverlay({ open, onDone }: Props) {
   const prev = () => setIdx((i) => Math.max(i - 1, 0));
   const go = (i: number) => setIdx(Math.min(Math.max(i, 0), total - 1));
 
-  // parallax “3D” feel for hero card
+  // parallax
   const mx = useMotionValue(0.5);
   const my = useMotionValue(0.5);
   const rotX = useTransform(my, [0, 1], [10, -10]);
@@ -99,7 +110,9 @@ export default function TutorialOverlay({ open, onDone }: Props) {
       {open && (
         <motion.div
           className="fixed inset-0 z-[80] bg-[radial-gradient(120%_120%_at_80%_10%,#0b0f17_0%,#05070c_55%,#000_100%)]"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
         >
           <BackgroundFX />
 
@@ -136,8 +149,9 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                     style={{
                       background:
                         "radial-gradient(520px circle at var(--gx) var(--gy), rgba(99,102,241,.22), transparent 60%)",
-                      // @ts-ignore: motion CSS var passthrough
-                      "--gx": glowX, "--gy": glowY,
+                      // @ts-ignore
+                      "--gx": glowX,
+                      "--gy": glowY,
                     }}
                   />
                   <div className="absolute inset-0 grid place-items-center">
@@ -161,9 +175,7 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                 <h2 className="text-white font-semibold text-3xl md:text-4xl leading-tight">
                   {slide.title}
                 </h2>
-                {slide.caption && (
-                  <p className="mt-3 text-white/85 text-lg">{slide.caption}</p>
-                )}
+                {slide.caption && <p className="mt-3 text-white/85 text-lg">{slide.caption}</p>}
 
                 {/* Controls */}
                 <div className="mt-8 flex items-center justify-between">
@@ -232,11 +244,24 @@ function MediaHero({ media }: { media: Media }) {
       initial={{ scale: 0.96, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 220, damping: 20 }}
+      // Optional: quick inline fallback
+      onError={(e) => {
+        (e.currentTarget as HTMLImageElement).style.opacity = "0.2";
+        (e.currentTarget as HTMLImageElement).alt = "Asset failed to load";
+      }}
     />
   );
 }
 
-function Dots({ total, active, onClick }: { total: number; active: number; onClick: (i: number) => void }) {
+function Dots({
+  total,
+  active,
+  onClick,
+}: {
+  total: number;
+  active: number;
+  onClick: (i: number) => void;
+}) {
   return (
     <div className="flex items-center gap-2">
       {Array.from({ length: total }).map((_, i) => (
@@ -244,8 +269,9 @@ function Dots({ total, active, onClick }: { total: number; active: number; onCli
           key={i}
           onClick={() => onClick(i)}
           aria-label={`Go to ${i + 1}`}
-          className={`h-2.5 w-2.5 rounded-full ring-1 ring-white/20 transition
-            ${i === active ? "bg-white/90 scale-110" : "bg-white/30 hover:bg-white/60"}`}
+          className={`h-2.5 w-2.5 rounded-full ring-1 ring-white/20 transition ${
+            i === active ? "bg-white/90 scale-110" : "bg-white/30 hover:bg-white/60"
+          }`}
         />
       ))}
     </div>

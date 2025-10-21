@@ -242,10 +242,19 @@ const stageCopy: Record<TxStage, { title: string; subtitle: string }> = {
   success: { title: "Success!", subtitle: "NFT is added to your wallet" },
 };
 
-const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
+/* ✅ Enhanced, sticky & resumable TxDialog */
+const TxDialog: React.FC<{
+  stage: TxStage;
+  hash?: `0x${string}` | null;
+  explorerHref?: string;
+  note?: string | null;
+  onDismiss?: () => void;
+  onForceReset?: () => void;
+}> = ({ stage, hash, explorerHref, note, onDismiss, onForceReset }) => {
   if (stage === "hidden") return null;
   const { title, subtitle } = stageCopy[stage];
   const isSuccess = stage === "success";
+  const isConfirming = stage === "confirming" || stage === "waiting";
   return (
     <AnimatePresence>
       <motion.div
@@ -257,7 +266,7 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
       >
         <motion.div
           className={`pointer-events-auto relative mx-4 w-full max-w-sm rounded-2xl ${
-            isSuccess ? "bg-black/40 ring-1 ring-emerald-300/20" : "bg-[#0b0f17]/85 ring-1 ring-white/10"
+            isSuccess ? "bg-black/40 ring-1 ring-emerald-300/20" : "bg-[#0b0f17]/90 ring-1 ring-white/12"
           } p-5 text-center`}
           initial={{ scale: 0.96, y: 8 }}
           animate={{ scale: 1, y: 0 }}
@@ -269,7 +278,41 @@ const TxDialog: React.FC<{ stage: TxStage }> = ({ stage }) => {
           </div>
           <h4 className={`font-semibold ${isSuccess ? "text-emerald-200" : "text-white/90"}`}>{title}</h4>
           <p className="mt-1 text-sm text-white/70">{subtitle}</p>
-          {isSuccess && <p className="mt-2 text-xs text-emerald-200/85">You can see your NFT in your wallet.</p>}
+          {note && <p className="mt-2 text-xs text-white/60">{note}</p>}
+
+          {isConfirming && (
+            <div className="mt-3 flex items-center justify-center gap-2 text-[12px] text-white/65">
+              {explorerHref ? (
+                <a className="underline hover:no-underline" href={explorerHref} target="_blank" rel="noreferrer">
+                  View on explorer
+                </a>
+              ) : null}
+              {hash ? <span className="opacity-60">•</span> : null}
+              {hash ? <span className="opacity-80">{shortenMid(hash, 10, 8)}</span> : null}
+            </div>
+          )}
+
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {isConfirming && (
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="rounded-lg px-3 py-1.5 text-[12px] bg-white/8 text-white/85 ring-1 ring-white/12 hover:bg-white/12"
+              >
+                Hide (keep waiting)
+              </button>
+            )}
+            {isConfirming && onForceReset && (
+              <button
+                type="button"
+                onClick={onForceReset}
+                className="rounded-lg px-3 py-1.5 text-[12px] bg-red-500/10 text-red-200 ring-1 ring-red-400/20 hover:bg-red-500/15"
+                title="Only if the transaction is stuck or dropped"
+              >
+                Clear & retry
+              </button>
+            )}
+          </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
@@ -436,6 +479,20 @@ export default function TierCard({
   const payTokenSymbol = tokenSymbol ?? YEARN_TOKEN_SYMBOL ?? "TOKEN";
   const connected = isConnected && !!address;
 
+  // --- NEW: explorer + pending key helpers/state ---
+  const explorerBase =
+    chain?.blockExplorers?.default?.url ??
+    (chain?.id === 56 ? "https://bscscan.com" : undefined);
+
+  const pendingKey = (addr?: Address) =>
+    addr ? `yt.pending.buy.${String(currentChainId)}.${String(tier.id)}.${addr}` : null;
+
+  const txUrl = (hash?: `0x${string}` | null) =>
+    hash && explorerBase ? `${explorerBase}/tx/${hash}` : undefined;
+
+  const [pendingHash, setPendingHash] = React.useState<`0x${string}` | null>(null);
+  const [resumeNote, setResumeNote] = React.useState<string | null>(null);
+
   // State
   const [meta, setMeta] = React.useState<NftMeta | null>(null);
   const [mediaUrl, setMediaUrl] = React.useState<string | undefined>(undefined);
@@ -484,7 +541,7 @@ export default function TierCard({
           if (per > 0n) perGasRef.current = per;
           return per;
         } catch {
-          const priority = 2_000_000_000n; // 2 gwei
+          const priority = 2_000_000_000n;
           const per = latest.baseFeePerGas * 2n + priority;
           perGasRef.current = per;
           return per;
@@ -676,9 +733,16 @@ export default function TierCard({
       setShowImportHelp(false); setAllowance(0n);
       setFeeApprove(null); setFeeBuy(null);
       setNativeBal(0n); setNativeBalReady(false);
+      // also clear any local pending guard
+      
+      const key = address ? pendingKey(address as Address) : null;
+
+      if (key) localStorage.removeItem(key);
+      setPendingHash(null);
+      setResumeNote(null);
       log("wallet-disconnected: cleared balances and state");
     }
-  }, [status]);
+  }, [status, address]);
 
   /** Token balance */
   React.useEffect(() => {
@@ -780,10 +844,80 @@ export default function TierCard({
     return null;
   };
 
+  // --- NEW: ownership check & resumable watcher ---
+  const alreadyOwned = React.useCallback(async () => {
+    if (!publicClient || !address) return false;
+    try {
+      const bal = (await publicClient.readContract({
+        address: passAddress,
+        abi: YEARNPASS1155_ABI,
+        functionName: "balanceOf",
+        args: [address, BigInt(tier.id)],
+      })) as bigint;
+      return bal > 0n;
+    } catch { return false; }
+  }, [publicClient, address, passAddress, tier.id]);
+
+  const watchPendingPurchase = React.useCallback(
+    async (hash: `0x${string}`) => {
+      setTxStage("confirming");
+      setResumeNote("Resuming your pending purchase… this can take a while on busy networks.");
+      try {
+        for (;;) {
+          if (await alreadyOwned()) {
+            setOwned(true);
+            setTxStage("success");
+            setCelebrate(true);
+            setTimeout(() => setTxStage("hidden"), 1800);
+            break;
+          }
+          try {
+            const rcpt = await publicClient!.getTransactionReceipt({ hash });
+            if (rcpt) {
+              if (rcpt.status === "success") {
+                if (await alreadyOwned()) setOwned(true);
+                setTxStage("success");
+                setCelebrate(true);
+                setTimeout(() => setTxStage("hidden"), 1800);
+              } else {
+                setErr("Transaction failed or was reverted.");
+                setTxStage("hidden");
+              }
+              break;
+            }
+          } catch {
+            // not yet indexed – keep waiting
+          }
+          await new Promise((r) => setTimeout(r, 4500));
+        }
+      } finally {
+        const key = pendingKey(address as Address);
+        if (key) localStorage.removeItem(key);
+        setPendingHash(null);
+        setResumeNote(null);
+      }
+    },
+    [publicClient, alreadyOwned, address]
+  );
+
+  // --- NEW: resume pending on mount/address/chain change ---
+  React.useEffect(() => {
+    (async () => {
+      if (!connected || !address) return;
+      const key = pendingKey(address);
+      const hash = key ? (localStorage.getItem(key) as `0x${string}` | null) : null;
+      if (hash) {
+        setPendingHash(hash);
+        watchPendingPurchase(hash);
+      }
+    })();
+  }, [connected, address, currentChainId, tier.id, watchPendingPurchase]);
+
   const doApprove = React.useCallback(async () => {
     setErr(null);
     lastActionRef.current = "approve";
     if (!connected || !address) { try { appKit?.open?.(); } catch { setErr("Connect your wallet first."); } return; }
+    if (pendingHash) { setErr("A purchase is already in progress. Please wait for it to finish."); return; }
     if (!walletClient || !publicClient) { setErr("Wallet or RPC is not ready."); return; }
     if (isZeroAddress(payTokenAddress)) { setErr("Payment token address is not set."); return; }
 
@@ -837,7 +971,7 @@ export default function TierCard({
       setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
       setTxStage("hidden");
     } finally { setBusy(false); }
-  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee, nativeBalReady, feeApprove]);
+  }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee, nativeBalReady, feeApprove, pendingHash]);
 
   const doBuy = React.useCallback(async () => {
     setErr(null);
@@ -904,40 +1038,19 @@ export default function TierCard({
         setErr(null);
       }
 
-      setTxStage("confirming");
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
-      if (receipt.status !== "success") throw new Error("Transaction reverted.");
+      // NEW: persist hash + guard, then resume watcher
+      const key = pendingKey(address);
+      if (key) localStorage.setItem(key, buyHash);
+      setPendingHash(buyHash);
 
-      const bal = (await publicClient.readContract({
-        address: passAddress, abi: YEARNPASS1155_ABI, functionName: "balanceOf", args: [address, BigInt(tier.id)],
-      })) as bigint;
-
-      const nowOwned = bal > 0n;
-      setOwned(nowOwned);
-
-      if (needsToken) {
-        try {
-          const newBal = (await publicClient.readContract({
-            address: payTokenAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address],
-          })) as bigint;
-          setTokenBal(newBal);
-        } catch {}
-      }
-
-      if (nowOwned) {
-        setTxStage("success"); setCelebrate(true);
-        if (isMobile()) setShowImportHelp(true);
-        setTimeout(() => { setTxStage("hidden"); setCelebrate(false); }, 1800);
-      } else {
-        setTxStage("hidden");
-      }
+      await watchPendingPurchase(buyHash);
     } catch (e: any) {
       const raw = e?.message || e?.shortMessage || e?.details;
       const nice = rewriteGasError(raw);
       setErr(nice || raw || "Transaction failed.");
       setTxStage("hidden");
     } finally { setBusy(false); }
-  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee, nativeBalReady, feeBuy]);
+  }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee, nativeBalReady, feeBuy, watchPendingPurchase]);
 
   // Labels
   const yourPriceLabel = priceIsFree ? "Free" : `${formatUnits(price, payTokenDecimals)} ${payTokenSymbol}`;
@@ -1120,7 +1233,31 @@ export default function TierCard({
 
               <OverlayLayer blur={txStage !== "hidden"}>
                 <ConfettiShower show={celebrate} />
-                <TxDialog stage={txStage} />
+                <TxDialog
+                  stage={txStage}
+                  hash={pendingHash}
+                  explorerHref={txUrl(pendingHash)}
+                  note={resumeNote}
+                  onDismiss={() => setTxStage("hidden")}
+                  onForceReset={
+                    pendingHash
+                      ? async () => {
+                          if (await alreadyOwned()) {
+                            const key = pendingKey(address as Address);
+                            if (key) localStorage.removeItem(key);
+                            setPendingHash(null);
+                            setTxStage("hidden");
+                            return;
+                          }
+                          const key = pendingKey(address as Address);
+                          if (key) localStorage.removeItem(key);
+                          setPendingHash(null);
+                          setTxStage("hidden");
+                          setErr("Pending transaction cleared. You can retry now.");
+                        }
+                      : undefined
+                  }
+                />
               </OverlayLayer>
             </motion.div>
 
@@ -1205,6 +1342,19 @@ export default function TierCard({
                 </div>
               )}
 
+              {/* NEW: pending chip with explorer link */}
+              {pendingHash && (
+                <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-indigo-500/10 text-indigo-200 ring-1 ring-indigo-400/20">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Purchase in progress…{" "}
+                  {txUrl(pendingHash) ? (
+                    <a className="underline hover:no-underline" href={txUrl(pendingHash)} target="_blank" rel="noreferrer">
+                      view tx
+                    </a>
+                  ) : null}
+                </div>
+              )}
+
               {/* Actions */}
               {!owned && (
                 <>
@@ -1225,27 +1375,39 @@ export default function TierCard({
                         <div className="mt-4 grid grid-cols-2 gap-2">
                           <button
                             onClick={doApprove}
-                            disabled={busy}
-                            className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 font-orbitron"
-                            title={haveFeeApprove && !hasEnoughFor(feeApprove) ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas` : undefined}
+                            disabled={busy || !!pendingHash}
+                            className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 font-orbitron disabled:opacity-60 disabled:cursor-not-allowed"
+                            title={
+                              pendingHash
+                                ? "Pending transaction in progress"
+                                : haveFeeApprove && !hasEnoughFor(feeApprove)
+                                ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas`
+                                : undefined
+                            }
                           >
                             {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Approving…</span> : "Approve"}
                           </button>
-                          <button disabled className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
+                          <button disabled className="w-full rounded-xl px-4 py-3 bg黑/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
                             Buy
                           </button>
                         </div>
                       ) : (
                         <motion.button
                           onClick={doBuy}
-                          disabled={busy || (!hasFunds && needsToken)}
+                          disabled={busy || !!pendingHash || (!hasFunds && needsToken)}
                           whileTap={{ scale: 0.985 }}
                           className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
-                            !hasFunds && needsToken
+                            (!!pendingHash || (!hasFunds && needsToken))
                               ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
                               : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
                           }`}
-                          title={haveFeeBuy && !hasEnoughFor(feeBuy) ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas` : undefined}
+                          title={
+                            pendingHash
+                              ? "Pending transaction in progress"
+                              : haveFeeBuy && !hasEnoughFor(feeBuy)
+                              ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas`
+                              : undefined
+                          }
                         >
                           <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
                           <span className="relative flex items-center gap-2">
