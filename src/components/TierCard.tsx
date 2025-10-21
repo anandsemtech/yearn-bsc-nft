@@ -1240,16 +1240,37 @@ export default function TierCard({
         args: [BigInt(tier.id), address],
       });
 
-      const send = walletClient.writeContract({ ...request, gas });
-      const watchdog = new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error("Wallet didn’t open. Tap Buy again.")), 15000)
-      );
-      const buyHash = await Promise.race([send, watchdog]);
+      // ✅ Soft, non-rejecting wallet hint instead of Promise.race watchdog
+      let walletHintTimer: ReturnType<typeof setTimeout> | null = null;
+      walletHintTimer = setTimeout(() => {
+        log("wallet-hint: waiting for user to confirm in wallet…");
+        setTxStage("waiting");
+        setErr(
+          "Still waiting for wallet confirmation… If your wallet is open, please approve the transaction."
+        );
+      }, 15000);
+
+      let buyHash: `0x${string}`;
+      try {
+        buyHash = await walletClient.writeContract({ ...request, gas });
+        log("buy:hash", { buyHash });
+      } finally {
+        if (walletHintTimer) {
+          clearTimeout(walletHintTimer);
+          walletHintTimer = null;
+        }
+        setErr(null); // clear the hint once we have a hash
+      }
 
       setTxStage("confirming");
 
       const receipt = await publicClient.waitForTransactionReceipt({
-        hash: buyHash as `0x${string}`,
+        hash: buyHash,
+      });
+      log("buy:receipt", {
+        status: receipt.status,
+        blockNumber: receipt.blockNumber?.toString?.(),
+        chainId: (publicClient as any)?.chain?.id,
       });
       if (receipt.status !== "success") throw new Error("Transaction reverted.");
 
