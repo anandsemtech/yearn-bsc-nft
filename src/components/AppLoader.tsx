@@ -18,17 +18,6 @@ type Props = {
   version?: string;
 };
 
-const isLowEndDevice = () => {
-  try {
-    const mem = (navigator as any).deviceMemory || 0;
-    const cores = navigator.hardwareConcurrency || 0;
-    const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    return uaMobile && ((mem && mem <= 4) || (cores && cores <= 4));
-  } catch {
-    return false;
-  }
-};
-
 const usePrefersReducedMotion = () => {
   const [reduced, setReduced] = React.useState(false);
   React.useEffect(() => {
@@ -44,41 +33,12 @@ const usePrefersReducedMotion = () => {
 export default function AppLoader({ show, onDone, durationMs = 2600, version }: Props) {
   const [progress, setProgress] = React.useState(0);
   const reducedMotion = usePrefersReducedMotion();
-  const lowEnd = React.useMemo(() => isLowEndDevice(), []);
-  const [canAutoplay, setCanAutoplay] = React.useState(false);
-  const [userTapped, setUserTapped] = React.useState(false);
-  const [inView, setInView] = React.useState(false);
 
   const resolvedVersion =
     version ??
     (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_APP_VERSION) ??
     (typeof process !== "undefined" && (process as any).env?.REACT_APP_VERSION) ??
     "v0.0.0";
-
-  // Mount guard for video (only when visible)
-  const hostRef = React.useRef<HTMLDivElement | null>(null);
-  React.useEffect(() => {
-    if (!hostRef.current || typeof IntersectionObserver === "undefined") {
-      setInView(true);
-      return;
-    }
-    const io = new IntersectionObserver(([e]) => setInView(!!e?.isIntersecting), {
-      rootMargin: "200px 0px",
-      threshold: 0.01,
-    });
-    io.observe(hostRef.current);
-    return () => io.disconnect();
-  }, []);
-
-  // Decide if video should autoplay
-  React.useEffect(() => {
-    if (!show) return;
-    if (reducedMotion || (lowEnd && !userTapped)) {
-      setCanAutoplay(false);
-      return;
-    }
-    setCanAutoplay(true);
-  }, [show, reducedMotion, lowEnd, userTapped]);
 
   // Progress timeline
   React.useEffect(() => {
@@ -107,6 +67,8 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
     };
   }, [show]);
 
+  const shouldAutoplay = show && !reducedMotion;
+
   return (
     <AnimatePresence>
       {show && (
@@ -116,7 +78,6 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
           aria-live="polite"
           aria-busy={true}
           role="alert"
-          ref={hostRef}
         >
           {/* Background */}
           <div className="absolute inset-0 bg-[#070a11]" />
@@ -153,11 +114,7 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
             {/* Center: Video */}
             <div className="flex-1 w-full px-4 flex items-center justify-center">
               <div className="relative">
-                <VideoCore
-                  playing={inView && canAutoplay}
-                  showTapOverlay={lowEnd && !userTapped}
-                  onTap={() => setUserTapped(true)}
-                />
+                <VideoCore playing={shouldAutoplay} />
                 {/* subtle static halo */}
                 <div
                   aria-hidden
@@ -207,15 +164,7 @@ export default function AppLoader({ show, onDone, durationMs = 2600, version }: 
 
 /* ───────────────────────── Video Core (WEBM teaser + poster) ───────────────────────── */
 
-function VideoCore({
-  playing,
-  showTapOverlay,
-  onTap,
-}: {
-  playing: boolean;
-  showTapOverlay: boolean;
-  onTap: () => void;
-}) {
+function VideoCore({ playing }: { playing: boolean }) {
   return (
     <div className="relative w-[260px] h-[260px] md:w-[320px] md:h-[320px]">
       {/* Glow behind */}
@@ -225,7 +174,7 @@ function VideoCore({
         aria-hidden
       />
 
-      {/* Poster */}
+      {/* Poster (blurred fallback image) */}
       <img
         src={BotPoster}
         alt=""
@@ -233,7 +182,7 @@ function VideoCore({
         draggable={false}
       />
 
-      {/* Video */}
+      {/* WebM video (autoplay unless reduced-motion) */}
       <video
         className="absolute inset-0 w-full h-full object-cover rounded-full"
         src={BotVideo}
@@ -241,7 +190,7 @@ function VideoCore({
         muted
         loop
         playsInline
-        preload="metadata"
+        preload="auto"
         autoPlay={playing}
       />
 
@@ -256,19 +205,6 @@ function VideoCore({
         }}
         aria-hidden
       />
-
-      {/* Low-end “Tap to play” */}
-      {showTapOverlay && (
-        <div className="absolute inset-0 grid place-items-center">
-          <button
-            type="button"
-            onClick={onTap}
-            className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 bg-black/55 text-white text-[12px] ring-1 ring-white/15 hover:bg-black/70"
-          >
-            Tap to play
-          </button>
-        </div>
-      )}
     </div>
   );
 }
