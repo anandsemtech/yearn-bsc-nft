@@ -8,16 +8,16 @@ import { http } from "wagmi";
 /* -------------------------------------------------------------------------- */
 
 // Derive a concrete network type from the actual export
-type Network = typeof bsc;
+export type Network = typeof bsc;
 
 // ✅ Create a MUTABLE array; do not use `as const`
 export const networks: Network[] = [{ ...bsc }];
 
-// Required project ID (Reown / WalletConnect)
-const projectId = import.meta.env.VITE_REOWN_PROJECT_ID as string;
-
-// Custom RPC (NodeReal, Ankr, PublicNode, etc.)
-const BSC_RPC = import.meta.env.VITE_BSC_RPC_URL as string;
+/**
+ * Use a strict custom RPC for BSC (NodeReal / Ankr / PublicNode / etc.)
+ * Keep env reading for RPC here.
+ */
+const BSC_RPC = import.meta.env.VITE_BSC_RPC_URL?.toString().trim();
 if (!BSC_RPC) {
   throw new Error(
     "[reown] Missing VITE_BSC_RPC_URL in .env — this app is configured to use a strict custom RPC."
@@ -25,17 +25,24 @@ if (!BSC_RPC) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                 Adapter init                                */
+/*                        Adapter factory (single source ID)                   */
 /* -------------------------------------------------------------------------- */
 
-export const wagmiAdapter = new WagmiAdapter({
-  projectId,
-  networks, // ✅ mutable array
-  ssr: false,
-  // Force all viem/wagmi calls to your custom RPC
-  transports: {
-    [bsc.id]: http(BSC_RPC),
-  },
-});
+/**
+ * Construct a WagmiAdapter with the caller-provided projectId.
+ * This avoids reading projectId in multiple places.
+ */
+export function makeWagmiAdapter(projectId: string) {
+  if (!projectId?.trim()) {
+    throw new Error("[reown] makeWagmiAdapter(projectId) requires a non-empty projectId.");
+  }
 
-export const wagmiConfig = wagmiAdapter.wagmiConfig;
+  return new WagmiAdapter({
+    projectId,
+    networks, // ✅ mutable array
+    ssr: false,
+    transports: {
+      [bsc.id]: http(BSC_RPC), // Force all viem/wagmi calls to your custom RPC
+    },
+  });
+}
