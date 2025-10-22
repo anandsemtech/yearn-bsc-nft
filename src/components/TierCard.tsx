@@ -902,20 +902,43 @@ export default function TierCard({
   const rewriteGasError = (raw?: string | null) => {
     if (!raw || !nativeBalReady) return null;
     const s = String(raw);
-    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low/i.test(s);
+    const match = /exceeds the balance of the account|insufficient funds for gas|intrinsic gas too low|max fee per gas less than block base fee/i.test(s);
     if (match) {
       const op = lastActionRef.current;
-      const need = op === "buy" ? feeBuy ?? roughBuyFee() : feeApprove ?? roughApproveFee();
+      const need = op === "buy" ? (feeBuy ?? roughBuyFee()) : (feeApprove ?? roughApproveFee());
       return gasWarnLine(need);
     }
     return null;
   };
 
-  const isUserRejected = (e: any) => {
-    const code = (e?.code ?? e?.cause?.code) as number | undefined;
-    const msg = String(e?.message || e?.shortMessage || e?.details || "");
-    return code === 4001 || /User (denied|rejected)|denied transaction signature|Request rejected/i.test(msg);
-  };
+
+  /* ---------------- error helpers (drop near top-level helpers) ---------------- */
+const extractErrText = (e: any): string => {
+  const parts = [
+    e?.shortMessage, e?.message, e?.details,
+    e?.cause?.shortMessage, e?.cause?.message, e?.cause?.details,
+    e?.cause?.cause?.message
+  ].filter(Boolean);
+  return parts.join(" | ");
+};
+
+const isUserRejected = (e: any) => {
+  // Walk possible codes
+  const code =
+    e?.code ?? e?.cause?.code ?? e?.cause?.cause?.code ?? e?.error?.code;
+  if ([4001, 5000, 5001, 12003].includes(code)) return true;
+
+  // Match common text variants across wallets/providers
+  const s = extractErrText(e).toLowerCase();
+  return (
+    /user rejected|user denied|request rejected|request denied|action_rejected|user cancelled|user canceled|request cancelled|request canceled/.test(
+      s
+    ) ||
+    // Some wallets bubble up a useless "unknown rpc/provider error" on cancel
+    (/unknown (rpc|provider) error/.test(s) && /reject|cancel|denied/.test(s))
+  );
+};
+
 
 
   // --- NEW: ownership check & resumable watcher ---
@@ -1052,15 +1075,15 @@ export default function TierCard({
       setAllowance(aNew);
       setTxStage("hidden");
     } catch (e: any) {
-        if (isUserRejected(e)) {
-          setErr("Transaction canceled in wallet. No funds were spent.");
-          setTxStage("hidden");
-        } else {
-          const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
-          setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
-          setTxStage("hidden");
-        }
-      } finally { setBusy(false); }
+      if (isUserRejected(e)) {
+        setErr("Transaction canceled in wallet. No funds were spent.");
+        setTxStage("hidden");
+      } else {
+        const nice = rewriteGasError(extractErrText(e));
+        setErr(nice || extractErrText(e) || "Approve failed.");
+        setTxStage("hidden");
+      }
+    } finally { setBusy(false); }
   }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee, nativeBalReady, feeApprove, pendingHash]);
 
   const doBuy = React.useCallback(async () => {
@@ -1143,16 +1166,16 @@ export default function TierCard({
 
       await watchPendingPurchase(buyHash);
     } catch (e: any) {
-        if (isUserRejected(e)) {
-          setErr("Purchase canceled in wallet. No funds were spent.");
-          setTxStage("hidden");
-        } else {
-          const raw = e?.message || e?.shortMessage || e?.details;
-          const nice = rewriteGasError(raw);
-          setErr(nice || raw || "Transaction failed.");
-          setTxStage("hidden");
-        }
-      } finally { setBusy(false); }
+      if (isUserRejected(e)) {
+        setErr("Purchase canceled in wallet. No funds were spent.");
+        setTxStage("hidden");
+      } else {
+        const raw = extractErrText(e);
+        const nice = rewriteGasError(raw);
+        setErr(nice || raw || "Transaction failed.");
+        setTxStage("hidden");
+      }
+    } finally { setBusy(false); }
   }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee, nativeBalReady, feeBuy, watchPendingPurchase]);
 
   // Labels
