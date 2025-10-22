@@ -911,6 +911,13 @@ export default function TierCard({
     return null;
   };
 
+  const isUserRejected = (e: any) => {
+    const code = (e?.code ?? e?.cause?.code) as number | undefined;
+    const msg = String(e?.message || e?.shortMessage || e?.details || "");
+    return code === 4001 || /User (denied|rejected)|denied transaction signature|Request rejected/i.test(msg);
+  };
+
+
   // --- NEW: ownership check & resumable watcher ---
   const alreadyOwned = React.useCallback(async () => {
     if (!publicClient || !address) return false;
@@ -1045,10 +1052,15 @@ export default function TierCard({
       setAllowance(aNew);
       setTxStage("hidden");
     } catch (e: any) {
-      const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
-      setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
-      setTxStage("hidden");
-    } finally { setBusy(false); }
+        if (isUserRejected(e)) {
+          setErr("Transaction canceled in wallet. No funds were spent.");
+          setTxStage("hidden");
+        } else {
+          const nice = rewriteGasError(e?.shortMessage || e?.details || e?.message);
+          setErr(nice || e?.shortMessage || e?.details || e?.message || "Approve failed.");
+          setTxStage("hidden");
+        }
+      } finally { setBusy(false); }
   }, [connected, address, walletClient, publicClient, payTokenAddress, marketAddress, price, estimateApproveFee, roughApproveFee, nativeBalReady, feeApprove, pendingHash]);
 
   const doBuy = React.useCallback(async () => {
@@ -1131,11 +1143,16 @@ export default function TierCard({
 
       await watchPendingPurchase(buyHash);
     } catch (e: any) {
-      const raw = e?.message || e?.shortMessage || e?.details;
-      const nice = rewriteGasError(raw);
-      setErr(nice || raw || "Transaction failed.");
-      setTxStage("hidden");
-    } finally { setBusy(false); }
+        if (isUserRejected(e)) {
+          setErr("Purchase canceled in wallet. No funds were spent.");
+          setTxStage("hidden");
+        } else {
+          const raw = e?.message || e?.shortMessage || e?.details;
+          const nice = rewriteGasError(raw);
+          setErr(nice || raw || "Transaction failed.");
+          setTxStage("hidden");
+        }
+      } finally { setBusy(false); }
   }, [connected, address, walletClient, publicClient, owned, marketAddress, passAddress, chain?.id, currentChainId, switchChainAsync, tier.id, needsToken, tokenBal, payTokenSymbol, estimateBuyFee, roughBuyFee, nativeBalReady, feeBuy, watchPendingPurchase]);
 
   // Labels
@@ -1575,7 +1592,7 @@ export default function TierCard({
                   <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="mt-3 text-center text-emerald-200/85 text-sm">
                     <div className="flex items-center justify-center gap-2">✅ Added to your vault <Sparkles /></div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
-                      
+
                       You can see your NFT in your wallet {txUrl(pendingHash) ? (<a href={txUrl(pendingHash)!} target="_blank" rel="noopener noreferrer" className="inline-flex items-center" title="View on explorer"><ExternalLink className="w-3.5 h-3.5 opacity-80" /></a>) : (<ExternalLink aria-hidden="true" focusable="false" className="w-3.5 h-3.5 opacity-80" />)}
 
 
