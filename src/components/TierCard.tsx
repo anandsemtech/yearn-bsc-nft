@@ -92,13 +92,35 @@ const shortenMid = (v?: string, left = 10, right = 6) => {
   return `${v.slice(0, left)}…${v.slice(-right)}`;
 };
 
+// NEW: platform checks
+const isIOS = () =>
+  typeof navigator !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+// Optional developer override in console:
+//   localStorage.setItem('yt.forceDevice','low' | 'high');  // then reload
 const isLowEndDevice = () => {
   try {
-    const mem = (navigator as any).deviceMemory || 0;
-    const cores = navigator.hardwareConcurrency || 0;
-    return isMobile() && ((mem && mem <= 4) || (cores && cores <= 4));
-  } catch { return false; }
+    const override = typeof localStorage !== "undefined" ? localStorage.getItem("yt.forceDevice") : null;
+    if (override === "low") return true;
+    if (override === "high") return false;
+
+    const nav: any = navigator || {};
+    const dataSaver = !!nav.connection?.saveData;           // user explicitly saves data
+    const mem = Number(nav.deviceMemory ?? 8);              // default to healthy
+    const cores = Number(nav.hardwareConcurrency ?? 8);     // default to healthy
+
+    // iOS (includes Chrome on iOS) → treat as high-end unless Data Saver is on
+    if (isIOS()) return dataSaver;
+
+    // Non-iOS: be conservative
+    return dataSaver || mem <= 3 || cores <= 2;
+  } catch {
+    // If we can’t tell, don’t punish the user
+    return false;
+  }
 };
+
 
 const isLikelyImage = (u?: string) =>
   !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
