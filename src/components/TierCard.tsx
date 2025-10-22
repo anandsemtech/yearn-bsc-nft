@@ -92,34 +92,110 @@ const shortenMid = (v?: string, left = 10, right = 6) => {
   return `${v.slice(0, left)}…${v.slice(-right)}`;
 };
 
-// NEW: platform checks
-const isIOS = () =>
-  typeof navigator !== "undefined" &&
-  /iPad|iPhone|iPod/.test(navigator.userAgent);
+// --- Capability & platform helpers ------------------------------------------
+const ua = () => (typeof navigator !== "undefined" ? navigator.userAgent : "");
+const isIOS = () => /iPad|iPhone|iPod/.test(ua());
+const isAndroid = () => /Android/i.test(ua());
+const dataSaverOn = () => !!(navigator as any)?.connection?.saveData;
 
-// Optional developer override in console:
-//   localStorage.setItem('yt.forceDevice','low' | 'high');  // then reload
-const isLowEndDevice = () => {
+const supportsWebGL2 = () => {
   try {
-    const override = typeof localStorage !== "undefined" ? localStorage.getItem("yt.forceDevice") : null;
-    if (override === "low") return true;
-    if (override === "high") return false;
-
-    const nav: any = navigator || {};
-    const dataSaver = !!nav.connection?.saveData;           // user explicitly saves data
-    const mem = Number(nav.deviceMemory ?? 8);              // default to healthy
-    const cores = Number(nav.hardwareConcurrency ?? 8);     // default to healthy
-
-    // iOS (includes Chrome on iOS) → treat as high-end unless Data Saver is on
-    if (isIOS()) return dataSaver;
-
-    // Non-iOS: be conservative
-    return dataSaver || mem <= 3 || cores <= 2;
+    const c = document.createElement("canvas");
+    return !!c.getContext("webgl2");
   } catch {
-    // If we can’t tell, don’t punish the user
     return false;
   }
 };
+
+// quick, cached micro-benchmark (lower = faster)
+const LOWEND_CACHE = "yt.lowend.v2";
+async function quickBenchmarkMs(): Promise<number> {
+  const t0 = performance.now();
+  // simple CPU loop (kept small to avoid jank)
+  let i = 0;
+  while (i < 300_000) i++;
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => resolve(performance.now() - t0))
+  );
+}
+
+// Conservative heuristic with positive hints
+function guessLowEndBase(): boolean {
+  // Dev override
+  const override = typeof localStorage !== "undefined" ? localStorage.getItem("yt.forceDevice") : null;
+  if (override === "low") return true;
+  if (override === "high") return false;
+
+  // Respect explicit user setting
+  if (dataSaverOn()) return true;
+
+  const nav: any = navigator || {};
+  const mem = Number.isFinite(nav.deviceMemory) ? Number(nav.deviceMemory) : undefined;
+  const cores = Number.isFinite(nav.hardwareConcurrency) ? Number(nav.hardwareConcurrency) : undefined;
+  const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+  const webgl2 = supportsWebGL2();
+
+  // Treat modern iOS/Android as high-end by default if positive hints are present
+  const mobileHighHints = (isIOS() || isAndroid()) && webgl2 && dpr >= 2;
+
+  // If OS won’t tell us memory/cores but we have strong hints, assume high-end
+  if (mobileHighHints && (mem === undefined || cores === undefined)) return false;
+
+  // If we *do* have metrics, only call low-end when both are clearly small
+  if (mem !== undefined && cores !== undefined) {
+    if (mem <= 3 && cores <= 2) return true; // genuinely small devices
+    return false;
+  }
+
+  // Fallback: if hints look weak, be cautious; otherwise assume fine
+  if (!webgl2 || dpr < 2) return true;
+  return false;
+}
+
+// Hook that refines the base guess with a tiny benchmark and caches the result
+function useLowEnd(): boolean {
+  const [low, setLow] = React.useState<boolean>(() => {
+    const cached = typeof localStorage !== "undefined" ? localStorage.getItem(LOWEND_CACHE) : null;
+    if (cached === "1") return true;
+    if (cached === "0") return false;
+    return guessLowEndBase(); // initial guess
+  });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    // Skip if user forced an override
+    const override = typeof localStorage !== "undefined" ? localStorage.getItem("yt.forceDevice") : null;
+    if (override === "low" || override === "high") return;
+
+    (async () => {
+      try {
+        const ms = await quickBenchmarkMs();
+        // Thresholds tuned to be gentle: >45ms → likely weak; <30ms → strong
+        const inferredLow = ms > 45;
+        const inferredHigh = ms < 30;
+
+        const final =
+          dataSaverOn() ? true :      // user intent wins
+          inferredHigh ? false :
+          inferredLow ? true :
+          guessLowEndBase();
+
+        if (!cancelled) {
+          setLow(final);
+          try {
+            localStorage.setItem(LOWEND_CACHE, final ? "1" : "0");
+          } catch {}
+        }
+      } catch {
+        // If the benchmark fails, keep the base guess
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  return low;
+}
 
 
 const isLikelyImage = (u?: string) =>
@@ -477,7 +553,8 @@ export default function TierCard({
 }: Props) {
   React.useEffect(() => { ensureOrbitronLink(); }, []);
 
-  const lowEnd = React.useMemo(() => isLowEndDevice(), []);
+  const lowEnd = useLowEnd();
+
 
   const { isConnected, address, chain, status } = useAccount();
   const { data: walletClient } = useWalletClient();
