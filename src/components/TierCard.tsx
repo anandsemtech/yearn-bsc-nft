@@ -197,11 +197,9 @@ function useLowEnd(): boolean {
   return low;
 }
 
-
 const isLikelyImage = (u?: string) =>
-  !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(u.split("?")[0] ?? "");
-const isLikelyVideo = (u?: string) =>
-  !!u && /\.(mp4|webm|mov|ogv)$/i.test(u.split("?")[0] ?? "");
+  !!u && /\.(png|jpe?g|webp|gif|avif|svg)$/i.test((u.split("?")[0] ?? ""));
+
 const isGif = (u?: string) => !!u && /\.gif(\?.*)?$/i.test((u.split("?")[0] ?? ""));
 const isSvg = (u?: string) => !!u && /\.svg(\?.*)?$/i.test((u.split("?")[0] ?? ""));
 
@@ -288,7 +286,8 @@ type Props = {
   tokenSymbol?: string;
 };
 
-const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a);
+ const isZeroAddress = (a?: string) => !a || /^0x0{40}$/i.test(a.trim());
+
 
 const format3 = (value: bigint, decimals: number) => {
   const str = formatUnits(value, decimals);
@@ -381,7 +380,8 @@ const TxDialog: React.FC<{
           {isConfirming && (
             <div className="mt-3 flex items-center justify-center gap-2 text-[12px] text-white/65">
               {explorerHref ? (
-                <a className="underline hover:no-underline" href={explorerHref} target="_blank" rel="noreferrer">
+                 <a className="underline hover:no-underline" href={explorerHref} target="_blank" rel="noopener noreferrer">
+
                   View on explorer
                 </a>
               ) : null}
@@ -475,45 +475,9 @@ const openConnect = () => { try { appKit?.open?.(); } catch {} };
 /** Utility */
 const hasValue = (v?: bigint | null) => typeof v === "bigint" && v > 0n;
 
-/* ====================== ✨ Video-based Brand Loader ✨ ====================== */
-function BrandLoader({
-  lowEnd,
-  needTap,
-  onTap,
-  label = "Loading NFT...",
-}: {
-  lowEnd: boolean;
-  needTap: boolean;
-  onTap: () => void;
-  label?: string;
-}) {
-  // If low-end + heavy GIF → show static blurred poster with "Tap to load"
-  if (lowEnd && needTap) {
-    return (
-      <div className="relative w-[72%] md:w-[64%] aspect-square grid place-items-center rounded-xl overflow-hidden ring-1 ring-white/10 bg-black/40">
-        <img
-          src={BotPoster}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover opacity-90"
-          draggable={false}
-          loading="eager"
-        />
-        <div className="absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_40%,rgba(0,0,0,.25),transparent_70%)]" />
-        <div className="absolute bottom-[64px] left-1/2 -translate-x-1/2 text-[12px] text-white/80">
-          Heavy media detected
-        </div>
-        <button
-          type="button"
-          onClick={onTap}
-          className="relative z-10 mb-5 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 bg-black/60 text-white text-[12px] ring-1 ring-white/15 hover:bg-black/75"
-        >
-          Tap to load
-        </button>
-      </div>
-    );
-  }
 
-  // Default: play a tiny looping WEBM teaser with a blurred poster fallback
+
+function BrandLoader({ label = "Loading NFT..." }: { label?: string }) {
   return (
     <div className="relative w-[72%] md:w-[64%] aspect-square grid place-items-center rounded-xl overflow-hidden ring-1 ring-white/10 bg-black/40">
       <img
@@ -524,6 +488,7 @@ function BrandLoader({
         loading="eager"
       />
       <video
+        // iOS that can't play WebM will just show the poster — that's fine.
         src={BotVideo}
         poster={BotPoster}
         autoPlay
@@ -540,6 +505,7 @@ function BrandLoader({
   );
 }
 
+
 /* ──────────────────────────────────────────────────────────────
    Main
    ────────────────────────────────────────────────────────────── */
@@ -553,7 +519,8 @@ export default function TierCard({
 }: Props) {
   React.useEffect(() => { ensureOrbitronLink(); }, []);
 
-  const lowEnd = useLowEnd();
+  const lowEnd = useLowEnd(); // always render full FX; loader is independent of UA/heuristics
+
 
 
   const { isConnected, address, chain, status } = useAccount();
@@ -595,7 +562,7 @@ export default function TierCard({
   // State
   const [meta, setMeta] = React.useState<NftMeta | null>(null);
   const [mediaUrl, setMediaUrl] = React.useState<string | undefined>(undefined);
-  const [isVideo, setIsVideo] = React.useState(false);
+  
   const [name, setName] = React.useState(`Pass #${tier.id}`);
   const [owned, setOwned] = React.useState(false);
 
@@ -621,6 +588,8 @@ export default function TierCard({
   const [feeApprove, setFeeApprove] = React.useState<bigint | null>(null);
   const [feeBuy, setFeeBuy] = React.useState<bigint | null>(null);
   const feeSymbol = chain?.nativeCurrency?.symbol || "BNB";
+  const nativeDecimals = chain?.nativeCurrency?.decimals ?? 18;
+
 
   const priceIsFree = price === 0n;
   const needsToken = !priceIsFree;
@@ -722,17 +691,17 @@ export default function TierCard({
 
   const gasWarnLine = (needWei?: bigint | null) => {
     if (!nativeBalReady) return `Fetching ${feeSymbol} balance… please try again in a moment.`;
-    const have = format5(nativeBal);
+    const have = format5(nativeBal, nativeDecimals);
     if (!needWei || needWei <= 0n) {
       return `Looks like you might need some ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}. Add a little more and try again.`;
     }
-    const needNum = Number(formatUnits(needWei, 18));
+    const needNum = Number(formatUnits(needWei, nativeDecimals));
+
     const needPretty = !isFinite(needNum) || needNum <= 0 ? "≈0.00001" : needNum < 1e-5 ? "≈0.00001" : needNum.toFixed(5);
     return `Not enough ${feeSymbol} for network fees. You have ~${have} ${feeSymbol}, need about ~${needPretty} ${feeSymbol}. Please top up and try again.`;
   };
 
-  /** Metadata fetch */
-  React.useEffect(() => {}, []);
+  
   React.useEffect(() => {
     let aborted = false;
     const ctrl = new AbortController();
@@ -766,9 +735,7 @@ export default function TierCard({
         const http = pick(media);
         setMediaUrl(http);
 
-        // 🚫 Treat GIFs as images (never as "video"). Video is only for teaser/placeholder.
-        const isVid = !!http && !isGif(http) && /\.(mp4|webm|mov|ogv)$/i.test(http);
-        setIsVideo(isVid);
+       
       } catch {}
     })();
 
@@ -962,8 +929,10 @@ export default function TierCard({
     async (hash: `0x${string}`) => {
       setTxStage("confirming");
       setResumeNote("Resuming your pending purchase… this can take a while on busy networks.");
-      try {
-        for (;;) {
+         try {
+     const t0 = Date.now();
+     let wait = 4500;
+     for (;;) {
           if (await alreadyOwned()) {
             setOwned(true);
             setTxStage("success");
@@ -988,8 +957,13 @@ export default function TierCard({
           } catch {
             // not yet indexed – keep waiting
           }
-          await new Promise((r) => setTimeout(r, 4500));
-        }
+       await new Promise((r) => setTimeout(r, wait));
+       wait = Math.min(wait * 1.3, 15000);
+       if (Date.now() - t0 > 10 * 60 * 1000) { // 10 min
+         setErr("Still waiting for confirmation. You can retry or check the explorer.");
+         setTxStage("hidden");
+         break;
+       }        }
       } finally {
         const key = pendingKey(address as Address);
         if (key) localStorage.removeItem(key);
@@ -1004,8 +978,10 @@ export default function TierCard({
   React.useEffect(() => {
     (async () => {
       if (!connected || !address) return;
-      const key = pendingKey(address);
-      const hash = key ? (localStorage.getItem(key) as `0x${string}` | null) : null;
+         const key = pendingKey(address);
+         let hash: `0x${string}` | null = null;
+         try { hash = key ? (localStorage.getItem(key) as `0x${string}` | null) : null; } catch {}
+       
       if (hash) {
         setPendingHash(hash);
         watchPendingPurchase(hash);
@@ -1044,7 +1020,8 @@ export default function TierCard({
         const { request } = await publicClient.simulateContract({
           account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, 0n],
         });
-        const h0 = await walletClient.writeContract({ ...request, gas: gas0 });
+        const h0 = await walletClient.writeContract({ ...request, gas: request.gas ?? gas0 });
+
         await publicClient.waitForTransactionReceipt({ hash: h0 });
         a = 0n;
       }
@@ -1056,7 +1033,8 @@ export default function TierCard({
         const { request } = await publicClient.simulateContract({
           account: address, address: payTokenAddress, abi: ERC20_ABI, functionName: "approve", args: [marketAddress, required],
         });
-        const hash = await walletClient.writeContract({ ...request, gas });
+        const hash = await walletClient.writeContract({ ...request, gas: request.gas ?? gas });
+
         await publicClient.waitForTransactionReceipt({ hash });
       }
 
@@ -1090,6 +1068,12 @@ export default function TierCard({
       if (targetChainId && chain?.id !== targetChainId && switchChainAsync) {
         try { await switchChainAsync({ chainId: targetChainId }); }
         catch { setBusy(false); setTxStage("hidden"); setErr("Please switch to the correct network."); return; }
+
+         // ensure we’re actually on the right rpc before simulating
+         const pcChain = (publicClient as any)?.chain?.id;
+         if (pcChain && pcChain !== targetChainId) {
+           await new Promise((r) => setTimeout(r, 50));
+         }
       }
 
       const currentPrice = (await publicClient.readContract({
@@ -1132,7 +1116,9 @@ export default function TierCard({
 
       let buyHash: `0x${string}`;
       try {
-        buyHash = await walletClient.writeContract({ ...request, gas });
+        
+        buyHash = await walletClient.writeContract({ ...request, gas: request.gas ?? gas });
+
       } finally {
         if (walletHintTimer) clearTimeout(walletHintTimer);
         setErr(null);
@@ -1186,35 +1172,9 @@ export default function TierCard({
   const [isScrolling, setIsScrolling] = React.useState(false);
   const [showMedia, setShowMedia] = React.useState(false);
   const [mediaLoaded, setMediaLoaded] = React.useState(false);
-  const [userTappedToLoad, setUserTappedToLoad] = React.useState(false);
+  
 
-  // NEW: GIF preload state + helper
-  const [gifReady, setGifReady] = React.useState(false);
-  const [playableGif, setPlayableGif] = React.useState<string | undefined>(undefined);
 
-  const preloadGif = React.useCallback((url?: string) => {
-    setGifReady(false);
-    setPlayableGif(undefined);
-    if (!url || !isGif(url)) return;
-    const img = new Image();
-    // @ts-ignore
-    img.decoding = "async";
-    img.referrerPolicy = "no-referrer";
-    img.crossOrigin = "anonymous";
-    img.onload = async () => {
-      try {
-        // @ts-ignore
-        if (img.decode) await img.decode();
-      } catch {}
-      setPlayableGif(url);
-      setGifReady(true);
-    };
-    img.onerror = () => {
-      setPlayableGif(url); // still try to show it; don't hang
-      setGifReady(true);
-    };
-    img.src = url;
-  }, []);
 
   React.useEffect(() => {
     if (!mediaHostRef.current || typeof IntersectionObserver === "undefined") {
@@ -1226,7 +1186,12 @@ export default function TierCard({
       { rootMargin: "800px 0px", threshold: 0 }
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      try { io.unobserve(el); } catch {}
+      try { io.disconnect(); } catch {}
+    };
+
+
   }, []);
 
   React.useEffect(() => {
@@ -1240,7 +1205,7 @@ export default function TierCard({
     return () => { window.removeEventListener("scroll", onScroll); if (t) clearTimeout(t); };
   }, []);
 
-  const isHeavyGif = React.useMemo(() => !!mediaUrl && isGif(mediaUrl), [mediaUrl]);
+  
 
   // Mount media as soon as it's near and not actively scrolling (no idle gating)
   React.useEffect(() => {
@@ -1262,24 +1227,15 @@ export default function TierCard({
   React.useEffect(() => {
     setShowMedia(false);
     setMediaLoaded(false);
-    setUserTappedToLoad(false);
-    setGifReady(false);
-    setPlayableGif(undefined);
   }, [mediaUrl]);
 
-  // Only preload GIFs when allowed (low-end requires tap first)
-  React.useEffect(() => {
-    if (!isGif(mediaUrl)) { setGifReady(false); setPlayableGif(undefined); return; }
-    if (lowEnd && !userTappedToLoad) { setGifReady(false); setPlayableGif(undefined); return; }
-    preloadGif(mediaUrl);
-  }, [mediaUrl, preloadGif, lowEnd, userTappedToLoad]);
-
+  
   // Extra guard: never let the loader hang forever
   const stallRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
     if (!showMedia || mediaLoaded) return;
     if (stallRef.current) clearTimeout(stallRef.current);
-    stallRef.current = setTimeout(() => setMediaLoaded(true), 5000);
+    stallRef.current = setTimeout(() => setMediaLoaded(true), 6000);
     return () => { if (stallRef.current) clearTimeout(stallRef.current); };
   }, [showMedia, mediaLoaded]);
 
@@ -1327,94 +1283,78 @@ export default function TierCard({
 
                 {/* ───────────── Deferred media region ───────────── */}
                 <div className="absolute inset-0 grid place-items-center">
-                  {/* Video-based loader while waiting/decoding */}
+                  {/* Loader (poster + tiny teaser). Shows while real media isn't ready. */}
                   {(!showMedia || !mediaLoaded) && (
-                    <BrandLoader
-                      lowEnd={lowEnd}
-                      needTap={lowEnd && isHeavyGif && !userTappedToLoad}
-                      onTap={() => setUserTappedToLoad(true)}
-                      label={inView ? "Loading NFT…" : "Waiting to appear…"}
-                    />
+                    <BrandLoader label={inView ? "Loading NFT…" : "Waiting to appear…"} />
                   )}
 
-                  {/* Actual media (mounts only when should show) */}
-                  {showMedia ? (
+                  {/* Real media mounts as soon as we're ready to show it */}
+                  {showMedia && mediaUrl ? (
                     isGif(mediaUrl) ? (
-                      <>
-                        {/* 1) Keep teaser video behind while GIF loads (and on low-end until user taps) */}
-                        {(!gifReady || (lowEnd && !userTappedToLoad)) && (
-                          <motion.video
-                            key="teaser-webm"
-                            src={BotVideo}
-                            poster={BotPoster}
-                            autoPlay
-                            loop
-                            muted
-                            playsInline
-                            preload="auto"
-                            className="absolute inset-0 m-auto w-[68%] h-auto rounded-lg opacity-80"
-                          />
-                        )}
+                      // GIF path: render immediately; fade in when loaded
+                      <motion.img
+                        key={mediaUrl}
+                        src={mediaUrl}
+                        alt={name}
+                        loading="eager"          // fetch ASAP; teaser stays visible until onLoad
+                        decoding="async"
+                        draggable={false}
+                        onLoad={() => setMediaLoaded(true)}
+                        onError={() => setMediaLoaded(true)}   // don't hang; keep teaser/poster visible
+                        className={`relative z-10 w-[78%] md:w-[70%] h-auto object-contain select-none ${
+                          mediaLoaded ? "opacity-100" : "opacity-0"
+                        }`}
+                        initial={{ scale: 0.985 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                      />
+                    ) : (/\.(mp4|webm|mov|ogv)$/i.test((mediaUrl.split("?")[0] ?? ""))) ? (
+                      // Video path
+                      <motion.video
+                        key={mediaUrl}
+                        src={mediaUrl}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        preload={dataSaverOn() ? "metadata" : "auto"}
+                        disablePictureInPicture
+                        controls={false}
+                        onLoadedData={() => setMediaLoaded(true)}
+                        onError={() => setMediaLoaded(true)}
+                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none rounded-lg ${
+                          mediaLoaded ? "opacity-100" : "opacity-0"
+                        }`}
+                        initial={{ scale: 0.985 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                      />
+                    ) : (
+                      // Static image path (non-GIF)
 
-                        {/* 2) Swap to the actual GIF as soon as it’s decoded (or after user taps on low-end) */}
-                        {playableGif && (!lowEnd || userTappedToLoad) && (
-                          <motion.img
-                            key={playableGif}
-                            src={playableGif}
-                            alt={name}
-                            loading="eager"
-                            decoding="async"
-                            draggable={false}
-                            onLoad={() => setMediaLoaded(true)}      // end loader
-                            onError={() => setMediaLoaded(true)}     // don't hang
-                            className={`relative z-10 w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
-                            initial={{ scale: 0.985 }}
-                            animate={{ scale: 1 }}
-                            transition={{ type: "spring", stiffness: 140, damping: 18 }}
-                          />
-                        )}
-                      </>
-                    ) : mediaUrl ? (
-                      (/\.(mp4|webm|mov|ogv)$/i.test(mediaUrl)) ? (
-                        <motion.video
-                          key={mediaUrl}
-                          src={mediaUrl}
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                          preload="auto"
-                          disablePictureInPicture
-                          controls={false}
-                          onLoadedData={() => setMediaLoaded(true)}
-                          onError={() => setMediaLoaded(true)}
-                          className={`w-[78%] md:w-[70%] h-auto object-contain select-none rounded-lg ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
-                          initial={{ scale: 0.985 }}
-                          animate={{ scale: 1 }}
-                          transition={{ type: "spring", stiffness: 140, damping: 18 }}
-                        />
-                      ) : (
-                        <motion.img
-                          key={mediaUrl}
-                          src={optimizedSet.src}
-                          srcSet={optimizedSet.srcSet}
-                          sizes={optimizedSet.sizes}
-                          alt={name}
-                          loading="lazy"
-                          decoding="async"
-                          draggable={false}
-                          onLoad={() => setMediaLoaded(true)}
-                          onError={() => setMediaLoaded(true)}
-                          className={`w-[78%] md:w-[70%] h-auto object-contain select-none ${mediaLoaded ? "opacity-100" : "opacity-0"}`}
-                          initial={{ scale: 0.985 }}
-                          animate={{ scale: 1 }}
-                          transition={{ type: "spring", stiffness: 140, damping: 18 }}
-                        />
-                      )
-                    ) : null
+                      <motion.img
+                        key={mediaUrl}
+                        src={optimizedSet.src}
+                        srcSet={optimizedSet.srcSet}
+                        sizes={optimizedSet.sizes}
+                        alt={name}
+                        loading="lazy"
+                        decoding="async"
+                        draggable={false}
+                        onLoad={() => setMediaLoaded(true)}
+                        onError={() => setMediaLoaded(true)}
+                        className={`w-[78%] md:w-[70%] h-auto object-contain select-none ${
+                          mediaLoaded ? "opacity-100" : "opacity-0"
+                        }`}
+                        initial={{ scale: 0.985 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 140, damping: 18 }}
+                      />
+                    )
                   ) : null}
                 </div>
                 {/* ───────────── /Deferred media region ───────────── */}
+
 
                 <OrbitRings />
                 <motion.div aria-hidden className="absolute inset-0" style={{ backgroundImage: glare }} />
@@ -1529,7 +1469,7 @@ export default function TierCard({
               {!owned && showGasChip && (
                 <div className="mt-2 text-[11px] md:text-xs inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 bg-amber-500/10 text-amber-200 ring-1 ring-amber-400/20">
                   <AlertCircle className="w-3.5 h-3.5" />
-                  Low {feeSymbol} for network fees. You have ~{format5(nativeBal)} {feeSymbol}.
+                  Low {feeSymbol} for network fees. You have ~{format5(nativeBal, nativeDecimals)} {feeSymbol}.
                 </div>
               )}
 
@@ -1539,7 +1479,8 @@ export default function TierCard({
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Purchase in progress…{" "}
                   {txUrl(pendingHash) ? (
-                    <a className="underline hover:no-underline" href={txUrl(pendingHash)} target="_blank" rel="noreferrer">
+                   <a className="underline hover:no-underline" href={txUrl(pendingHash)} target="_blank" rel="noopener noreferrer">
+
                       view tx
                     </a>
                   ) : null}
@@ -1567,15 +1508,11 @@ export default function TierCard({
                           <button
                             onClick={doApprove}
                             disabled={busy || !!pendingHash}
+                            aria-busy={busy || !!pendingHash}
                             className="w-full rounded-xl px-4 py-3 bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 font-orbitron disabled:opacity-60 disabled:cursor-not-allowed"
-                            title={
-                              pendingHash
-                                ? "Pending transaction in progress"
-                                : haveFeeApprove && !hasEnoughFor(feeApprove)
-                                ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas`
-                                : undefined
-                            }
+                            title={pendingHash ? "Pending transaction in progress" : haveFeeApprove && !hasEnoughFor(feeApprove) ? `Need ~${format5(feeApprove!)} ${feeSymbol} for gas` : undefined}
                           >
+
                             {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Approving…</span> : "Approve"}
                           </button>
                           <button disabled className="w-full rounded-xl px-4 py-3 bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed font-orbitron" title="Approve first">
@@ -1584,22 +1521,14 @@ export default function TierCard({
                         </div>
                       ) : (
                         <motion.button
-                          onClick={doBuy}
-                          disabled={busy || !!pendingHash || (!hasFunds && needsToken)}
-                          whileTap={{ scale: 0.985 }}
-                          className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${
-                            (!!pendingHash || (!hasFunds && needsToken))
-                              ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed"
-                              : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition"
-                          }`}
-                          title={
-                            pendingHash
-                              ? "Pending transaction in progress"
-                              : haveFeeBuy && !hasEnoughFor(feeBuy)
-                              ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas`
-                              : undefined
-                          }
-                        >
+                            onClick={doBuy}
+                            disabled={busy || !!pendingHash || (!hasFunds && needsToken)}
+                            aria-busy={busy || !!pendingHash}
+                            whileTap={{ scale: 0.985 }}
+                            className={`group relative mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold tracking-wide focus:outline-none font-orbitron min-h-[44px] ${((!!pendingHash || (!hasFunds && needsToken)) ? "bg-black/35 text-white/60 ring-1 ring-white/10 cursor-not-allowed" : "bg-[#0b0f17]/75 text-white ring-1 ring-indigo-400/30 hover:ring-indigo-300/40 hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10),0_12px_36px_rgba(99,102,241,0.20)] transition")}`}
+                            title={pendingHash ? "Pending transaction in progress" : haveFeeBuy && !hasEnoughFor(feeBuy) ? `Need ~${format5(feeBuy!)} ${feeSymbol} for gas` : undefined}
+                          >
+
                           <span aria-hidden className="pointer-events-none absolute -inset-[1px] rounded-xl bg-[conic-gradient(from_0deg,rgba(129,140,248,.15),rgba(56,189,248,.12),transparent_60%,transparent)] opacity-60 blur-sm transition group-hover:opacity-80" />
                           <span className="relative flex items-center gap-2">
                             {busy ? (
@@ -1646,7 +1575,14 @@ export default function TierCard({
                   <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="mt-3 text-center text-emerald-200/85 text-sm">
                     <div className="flex items-center justify-center gap-2">✅ Added to your vault <Sparkles /></div>
                     <div className="mt-1 text-emerald-100/70 flex items-center justify-center gap-1 text-[12px]">
-                      You can see your NFT in your wallet <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                      
+                      You can see your NFT in your wallet {txUrl(pendingHash) ? (<a href={txUrl(pendingHash)!} target="_blank" rel="noopener noreferrer" className="inline-flex items-center" title="View on explorer"><ExternalLink className="w-3.5 h-3.5 opacity-80" /></a>) : (<ExternalLink aria-hidden="true" focusable="false" className="w-3.5 h-3.5 opacity-80" />)}
+
+
+
+
+
+
                     </div>
                   </motion.div>
                 )}
