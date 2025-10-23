@@ -37,22 +37,9 @@ const FooterBar: React.FC = () => {
         <div className="relative mx-auto max-w-3xl px-4 pb-[calc(env(safe-area-inset-bottom,0px)+10px)]">
           <div className="pointer-events-auto bg-gradient-to-t from-[#0b0d12]/95 to-[#151822]/80 backdrop-blur-xl border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.45)] rounded-t-[28px]">
             <nav className="flex items-center justify-between px-6 pt-4 pb-5">
-              {/* My NFT */}
-              <button
-                onClick={() => setFilter("mine")}
-                className={`flex flex-col items-center gap-1 rounded-2xl px-3 py-2 active:scale-95 transition-all ${
-                  active === "mine"
-                    ? "text-white bg-white/[0.10]"
-                    : "text-white/80 hover:text-white hover:bg-white/[0.06]"
-                }`}
-                aria-label="Open My NFT"
-                title="My NFT"
-              >
-                <FolderOpen className="w-5 h-5" />
-                <span className="text-[11px] font-medium">My NFT</span>
-              </button>
+             
 
-              <div className="w-16" />
+              
 
               {/* All NFT */}
               <button
@@ -68,6 +55,24 @@ const FooterBar: React.FC = () => {
                 <Layers className="w-5 h-5" />
                 <span className="text-[11px] font-medium">All NFT</span>
               </button>
+
+                <div className="w-16" />
+
+               {/* My NFT */}
+              <button
+                onClick={() => setFilter("mine")}
+                className={`flex flex-col items-center gap-1 rounded-2xl px-3 py-2 active:scale-95 transition-all ${
+                  active === "mine"
+                    ? "text-white bg-white/[0.10]"
+                    : "text-white/80 hover:text-white hover:bg-white/[0.06]"
+                }`}
+                aria-label="Open My NFT"
+                title="My NFT"
+              >
+                <FolderOpen className="w-5 h-5" />
+                <span className="text-[11px] font-medium">My NFT</span>
+              </button>
+
             </nav>
           </div>
 
