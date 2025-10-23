@@ -68,14 +68,18 @@ export default function TutorialOverlay({ open, onDone }: Props) {
   const prev = () => setIdx((i) => Math.max(i - 1, 0));
   const go = (i: number) => setIdx(Math.min(Math.max(i, 0), total - 1));
 
+  // responsive tilt (only on lg+)
+  const isTilt = useMedia("(min-width: 1024px)");
+
   // parallax
   const mx = useMotionValue(0.5);
   const my = useMotionValue(0.5);
-  const rotX = useTransform(my, [0, 1], [10, -10]);
-  const rotY = useTransform(mx, [0, 1], [-10, 10]);
+  const rotX = useTransform(my, [0, 1], [8, -8]);
+  const rotY = useTransform(mx, [0, 1], [-8, 8]);
   const glowX = useTransform(mx, (v) => `${v * 100}%`);
   const glowY = useTransform(my, (v) => `${v * 100}%`);
   const onMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isTilt) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const p = "touches" in e ? e.touches[0] : (e as React.MouseEvent);
     mx.set((p.clientX - rect.left) / rect.width);
@@ -88,36 +92,45 @@ export default function TutorialOverlay({ open, onDone }: Props) {
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[80] bg-[radial-gradient(120%_120%_at_80%_10%,#0b0f17_0%,#05070c_55%,#000_100%)]"
+          className="fixed inset-0 z-[80] bg-[radial-gradient(120%_120%_at_80%_10%,#0b0f17_0%,#05070c_55%,#000_100%)] pb-[env(safe-area-inset-bottom)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <BackgroundFX />
 
-          {/* Widen container: more breathing room for video */}
-          <div className="relative mx-auto max-w-7xl xl:max-w-8xl h-full px-6 py-8 sm:py-12 grid grid-rows-[auto,1fr,auto] gap-6">
-            {/* Top bar (optional, keep empty for now) */}
-           
+          {/* Wider container, mobile-safe padding */}
+          <div className="relative mx-auto max-w-7xl xl:max-w-8xl h-full px-4 sm:px-6 py-8 sm:py-12 grid grid-rows-[auto,1fr,auto] gap-6">
+
             {/* Center stage */}
-            {/* Give more width to media on large screens */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1.6fr,1fr] gap-10 items-center">
-              {/* Visual hero */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1.55fr,1fr] gap-8 sm:gap-10 items-center">
+              {/* Visual hero — fully contained on all screens */}
               <motion.div
                 onMouseMove={onMove as any}
                 onTouchMove={onMove as any}
-                className="relative aspect-[16/9] rounded-3xl overflow-hidden ring-1 ring-white/10 bg-[#0b0f17]/70 min-h-[280px] lg:min-h-[440px]"
-                style={{ perspective: 1200 } as React.CSSProperties}
+                className="relative w-full aspect-[16/9] rounded-3xl overflow-hidden ring-1 ring-white/10 bg-[#0b0f17]/70 min-h-[240px] sm:min-h-[300px] lg:min-h-[420px]"
+                style={
+                  {
+                    perspective: isTilt ? 1200 : 0,
+                    contain: "paint",
+                  } as React.CSSProperties
+                }
               >
                 <StarField />
 
                 <motion.div
-                  className="absolute inset-4 rounded-[26px] ring-1 ring-white/10 bg-gradient-to-br from-white/[.05] to-white/[.02] shadow-2xl"
-                  style={{ rotateX: rotX, rotateY: rotY, transformStyle: "preserve-3d" as any }}
+                  className="absolute inset-2 sm:inset-3 lg:inset-4 rounded-[22px] sm:rounded-[24px] lg:rounded-[26px] ring-1 ring-white/10 bg-gradient-to-br from-white/[.05] to-white/[.02] shadow-2xl overflow-hidden"
+                  style={{
+                    rotateX: isTilt ? (rotX as any) : 0,
+                    rotateY: isTilt ? (rotY as any) : 0,
+                    transformStyle: isTilt ? ("preserve-3d" as any) : "flat",
+                    backfaceVisibility: "hidden",
+                    willChange: isTilt ? "transform" : "auto",
+                  }}
                 >
-                  {/* dynamic glow following pointer */}
+                  {/* dynamic glow (never exceeds frame) */}
                   <motion.div
-                    className="absolute -inset-10 rounded-[2rem] opacity-60 blur-3xl"
+                    className="absolute inset-0 rounded-[2rem] opacity-60 blur-3xl"
                     style={
                       {
                         background:
@@ -128,17 +141,19 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                       } as React.CSSProperties
                     }
                   />
-                  <div className="absolute inset-0 grid place-items-center p-2 sm:p-4">
+
+                  {/* Media container — pad a bit but keep inside */}
+                  <div className="absolute inset-0 grid place-items-center p-2 sm:p-3 lg:p-4 overflow-hidden">
                     <MediaHero media={slide.media} />
                   </div>
                 </motion.div>
 
-                {/* color wash + vignette */}
+                {/* color wash + vignette (also clipped by overflow-hidden) */}
                 <div className={`absolute inset-0 rounded-3xl bg-gradient-to-br ${slide.from} ${slide.to}`} />
                 <div className="absolute inset-0 rounded-3xl bg-[radial-gradient(80%_80%_at_50%_120%,rgba(0,0,0,.6),transparent)]" />
               </motion.div>
 
-              {/* Copy block — slightly larger text for presence */}
+              {/* Copy */}
               <motion.div
                 key={idx}
                 initial={{ opacity: 0, y: 10 }}
@@ -156,7 +171,7 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                   </p>
                 )}
 
-                {/* Controls — centered per your request */}
+                {/* Controls — centered on mobile */}
                 <div className="mt-10 flex items-center justify-center lg:justify-start gap-4">
                   <button
                     onClick={prev}
@@ -177,7 +192,6 @@ export default function TutorialOverlay({ open, onDone }: Props) {
               </motion.div>
             </div>
 
-            {/* Bottom spacer */}
             <div />
           </div>
         </motion.div>
@@ -199,8 +213,8 @@ function MediaHero({ media }: { media: Media }) {
         loop
         muted
         playsInline
-        className="w-[94%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
-        initial={{ scale: 0.965, opacity: 0 }}
+        className="w-full h-full max-w-full max-h-full rounded-xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
+        initial={{ scale: 0.99, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 220, damping: 20 }}
       />
@@ -211,8 +225,8 @@ function MediaHero({ media }: { media: Media }) {
       key={media.src}
       src={media.src}
       alt={media.alt}
-      className="w-[94%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
-      initial={{ scale: 0.965, opacity: 0 }}
+      className="w-full h-full max-w-full max-h-full rounded-xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
+      initial={{ scale: 0.99, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 220, damping: 20 }}
       onError={(e) => {
@@ -293,4 +307,23 @@ function StarField() {
       />
     </div>
   );
+}
+
+/* Small utility: matchMedia hook */
+function useMedia(query: string) {
+  const [matches, setMatches] = React.useState<boolean>(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia(query);
+    const onChange = () => setMatches(mq.matches);
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, [query]);
+  return matches;
 }
