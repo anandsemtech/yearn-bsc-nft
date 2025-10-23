@@ -6,12 +6,8 @@ import { ChevronRight, ChevronLeft } from "lucide-react";
 
 /* -------------------------------------------------------------------------- */
 /*                             Import your assets                              */
-/*  If you keep files in src/assets, import them.                              */
-/*  If you prefer public/assets, you can revert to "/assets/..." paths.       */
 /* -------------------------------------------------------------------------- */
-import tutorial1Img from "../assets/tutorial1.png";
-import tutorial2Img from "../assets/tutorial2.png";
-import tutorial3Img from "../assets/tutorial3.png";
+import yearnftVideo from "../assets/yearnft.mp4";
 
 type Media =
   | { type: "video"; src: string; alt: string }
@@ -27,29 +23,12 @@ type Slide = {
 
 const SLIDES: Slide[] = [
   {
-    title: "Simple can become legendary. ✨",
-    caption:
-      "Iconic early NFTs proved that a moment can turn into history. Start bold—hesitation is the only myth.",
-    media: { type: "image", src: tutorial1Img, alt: "Myth breaking orb and shards" },
-    from: "from-amber-400/25",
-    to: "to-rose-400/20",
-  },
-  {
     title: "YearnTogether opens the doors. 🔓",
     caption:
       "One pass. Many worlds. Access today—potential for tomorrow. Your journey scales with our growing ecosystem.",
-    // Was incorrectly typed as "video" with a PNG. Make it an image.
-    media: { type: "image", src: tutorial2Img, alt: "Opening portals and rings" },
+    media: { type: "video", src: yearnftVideo, alt: "Opening portals and rings" },
     from: "from-indigo-500/25",
     to: "to-cyan-400/20",
-  },
-  {
-    title: "You’re in the right place. 🌱",
-    caption:
-      "Thanks for choosing Yearn NFTs. You belong here. Let’s grow together—community first, momentum always.",
-    media: { type: "image", src: tutorial3Img, alt: "Crown with radiant flare" },
-    from: "from-emerald-400/25",
-    to: "to-teal-400/20",
   },
 ];
 
@@ -116,26 +95,19 @@ export default function TutorialOverlay({ open, onDone }: Props) {
         >
           <BackgroundFX />
 
-          <div className="relative mx-auto max-w-6xl h-full px-4 py-8 sm:py-12 grid grid-rows-[auto,1fr,auto] gap-4">
-            {/* top bar */}
-            <div className="flex items-center justify-between">
-              <div className="text-white/80 text-sm tracking-wide">Onboarding</div>
-              <button
-                onClick={onDone}
-                className="rounded-lg px-3 py-2 text-sm bg-white/10 hover:bg-white/15 ring-1 ring-white/15 text-white"
-              >
-                Skip
-              </button>
-            </div>
-
-            {/* center stage */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1.25fr,0.9fr] gap-8 items-center">
+          {/* Widen container: more breathing room for video */}
+          <div className="relative mx-auto max-w-7xl xl:max-w-8xl h-full px-6 py-8 sm:py-12 grid grid-rows-[auto,1fr,auto] gap-6">
+            {/* Top bar (optional, keep empty for now) */}
+           
+            {/* Center stage */}
+            {/* Give more width to media on large screens */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1.6fr,1fr] gap-10 items-center">
               {/* Visual hero */}
               <motion.div
                 onMouseMove={onMove as any}
                 onTouchMove={onMove as any}
-                className="relative aspect-[16/10] lg:aspect-[16/9] rounded-3xl overflow-hidden ring-1 ring-white/10 bg-[#0b0f17]/70"
-                style={{ perspective: 1200 }}
+                className="relative aspect-[16/9] rounded-3xl overflow-hidden ring-1 ring-white/10 bg-[#0b0f17]/70 min-h-[280px] lg:min-h-[440px]"
+                style={{ perspective: 1200 } as React.CSSProperties}
               >
                 <StarField />
 
@@ -146,15 +118,17 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                   {/* dynamic glow following pointer */}
                   <motion.div
                     className="absolute -inset-10 rounded-[2rem] opacity-60 blur-3xl"
-                    style={{
-                      background:
-                        "radial-gradient(520px circle at var(--gx) var(--gy), rgba(99,102,241,.22), transparent 60%)",
-                      // @ts-ignore
-                      "--gx": glowX,
-                      "--gy": glowY,
-                    }}
+                    style={
+                      {
+                        background:
+                          "radial-gradient(520px circle at var(--gx) var(--gy), rgba(99,102,241,.22), transparent 60%)",
+                        // @ts-ignore
+                        "--gx": glowX,
+                        "--gy": glowY,
+                      } as React.CSSProperties
+                    }
                   />
-                  <div className="absolute inset-0 grid place-items-center">
+                  <div className="absolute inset-0 grid place-items-center p-2 sm:p-4">
                     <MediaHero media={slide.media} />
                   </div>
                 </motion.div>
@@ -164,42 +138,38 @@ export default function TutorialOverlay({ open, onDone }: Props) {
                 <div className="absolute inset-0 rounded-3xl bg-[radial-gradient(80%_80%_at_50%_120%,rgba(0,0,0,.6),transparent)]" />
               </motion.div>
 
-              {/* Minimal micro-copy */}
+              {/* Copy block — slightly larger text for presence */}
               <motion.div
                 key={idx}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ type: "spring", stiffness: 180, damping: 22 }}
+                className="text-center lg:text-left"
               >
-                <h2 className="text-white font-semibold text-3xl md:text-4xl leading-tight">
+                <h2 className="text-white font-semibold text-3xl md:text-5xl leading-tight">
                   {slide.title}
                 </h2>
-                {slide.caption && <p className="mt-3 text-white/85 text-lg">{slide.caption}</p>}
+                {slide.caption && (
+                  <p className="mt-4 text-white/85 text-lg md:text-xl leading-relaxed">
+                    {slide.caption}
+                  </p>
+                )}
 
-                {/* Controls */}
-                <div className="mt-8 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={prev}
-                      disabled={idx === 0}
-                      className="rounded-xl px-3 py-2 bg-white/10 hover:bg-white/15 ring-1 ring-white/15 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={next}
-                      className="rounded-xl px-3 py-2 bg-white/10 hover:bg-white/15 ring-1 ring-white/15"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <Dots total={total} active={idx} onClick={go} />
+                {/* Controls — centered per your request */}
+                <div className="mt-10 flex items-center justify-center lg:justify-start gap-4">
+                  <button
+                    onClick={prev}
+                    disabled={idx === 0}
+                    className="hidden sm:inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium bg-white/5 hover:bg-white/10 text-white/90 ring-1 ring-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="size-4" />
+                    Back
+                  </button>
 
                   <button
                     onClick={next}
-                    className="rounded-xl px-6 py-3 text-sm md:text-base font-semibold bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-500/20"
+                    className="rounded-xl px-7 py-3.5 text-base font-semibold bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-500/20"
                   >
                     {isLast ? "Enter app" : "Continue"}
                   </button>
@@ -207,6 +177,7 @@ export default function TutorialOverlay({ open, onDone }: Props) {
               </motion.div>
             </div>
 
+            {/* Bottom spacer */}
             <div />
           </div>
         </motion.div>
@@ -228,8 +199,8 @@ function MediaHero({ media }: { media: Media }) {
         loop
         muted
         playsInline
-        className="w-[92%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
-        initial={{ scale: 0.96, opacity: 0 }}
+        className="w-[94%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
+        initial={{ scale: 0.965, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 220, damping: 20 }}
       />
@@ -240,11 +211,10 @@ function MediaHero({ media }: { media: Media }) {
       key={media.src}
       src={media.src}
       alt={media.alt}
-      className="w-[92%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
-      initial={{ scale: 0.96, opacity: 0 }}
+      className="w-[94%] h-auto rounded-2xl object-contain shadow-[0_40px_140px_rgba(0,0,0,.45)]"
+      initial={{ scale: 0.965, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: "spring", stiffness: 220, damping: 20 }}
-      // Optional: quick inline fallback
       onError={(e) => {
         (e.currentTarget as HTMLImageElement).style.opacity = "0.2";
         (e.currentTarget as HTMLImageElement).alt = "Asset failed to load";
